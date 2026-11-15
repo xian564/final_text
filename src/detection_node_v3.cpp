@@ -32,7 +32,8 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
                          const cv::Scalar& lo_r, const cv::Scalar& hi_r,
                          const cv::Scalar& lo_b, const cv::Scalar& hi_b,
                          const cv::Scalar& lo_g, const cv::Scalar& hi_g,
-                         int morph_size, int sv_min);
+                         int morph_size, int sv_min,
+                         int y_h_min, int y_h_max, int y_s_min, int y_v_min);
 
 // ============================================================
 //  A. VisionNodeV3：ROS 节点
@@ -60,8 +61,12 @@ public:
         pnh_.param("max_speed",   max_speed_, 8.0);     // 车体物理极限 m/s
         pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
-        pnh_.param("hsv_sv_min",   hsv_sv_min_, 150);
-        pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.75);
+        pnh_.param("hsv_sv_min",   hsv_sv_min_, 120);
+        pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.45);
+        pnh_.param("yellow_h_min", yellow_h_min_, 10);
+        pnh_.param("yellow_h_max", yellow_h_max_, 35);
+        pnh_.param("yellow_s_min", yellow_s_min_, 80);
+        pnh_.param("yellow_v_min", yellow_v_min_, 80);
 
         info_sub_ = nh_.subscribe(
             "/hk_camera/camera_info", 1,
@@ -215,7 +220,8 @@ private:
                          cv::Scalar(0, hsv_sv_min_, hsv_sv_min_), cv::Scalar(10, 255, 255),
                          cv::Scalar(110, hsv_sv_min_, hsv_sv_min_), cv::Scalar(130, 255, 255),
                          cv::Scalar(50, hsv_sv_min_, hsv_sv_min_), cv::Scalar(70, 255, 255),
-                         morph_size_, hsv_sv_min_);
+                         morph_size_, hsv_sv_min_,
+                         yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_);
 
             const double stamp = msg->header.stamp.toSec();
             int lost_this_frame = 1;
@@ -609,6 +615,7 @@ private:
     int morph_size_;
     int hsv_sv_min_;
     double roi_y_ratio_;
+    int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
@@ -644,7 +651,8 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
                          const cv::Scalar& lo_r, const cv::Scalar& hi_r,
                          const cv::Scalar& lo_b, const cv::Scalar& hi_b,
                          const cv::Scalar& lo_g, const cv::Scalar& hi_g,
-                         int morph_size, int sv_min) {
+                         int morph_size, int sv_min,
+                         int y_h_min, int y_h_max, int y_s_min, int y_v_min) {
     if (bgr.empty()) { res = cv::Mat(); return; }
 
     cv::Mat hsv;
@@ -658,8 +666,14 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
     cv::inRange(hsv, lo_b, hi_b, mask_b);
     cv::inRange(hsv, lo_g, hi_g, mask_g);
 
+    // 黄色/橙色（H 10~40 可调）
+    cv::Mat mask_y;
+    cv::inRange(hsv, cv::Scalar(y_h_min, y_s_min, y_v_min),
+                     cv::Scalar(y_h_max, 255, 255), mask_y);
+
     cv::bitwise_or(mask_r, mask_b, mask_all);
     cv::bitwise_or(mask_all, mask_g, mask_all);
+    cv::bitwise_or(mask_all, mask_y, mask_all);
 
     // C1：3x3 + MORPH_OPEN
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
