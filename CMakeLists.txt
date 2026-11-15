@@ -19,6 +19,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   sensor_msgs
   tf2
+  tf2_ros
+  geometry_msgs
 )
 
 # ROS Noetic 自带 OpenCV 4.2；/usr/local 另有 4.5.5，混链会 ABI 冲突
@@ -228,6 +230,14 @@ include_directories(
 add_executable(detect_node src/detection_node.cpp)
 
 target_link_libraries(detect_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
+
+# ---- v2：抗眩光/残缺/抖动升级版（新建文件，不影响 detect_node） ----
+add_executable(detect_node_v2 src/detection_node_v2.cpp)
+
+target_link_libraries(detect_node_v2
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )

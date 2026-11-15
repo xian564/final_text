@@ -1,0 +1,9 @@
+<launch>
+    <param name="use_sim_time" value="true" />
+
+    <node pkg="final_text" type="detect_node_v2" name="vision_node_v2" output="screen" />
+
+    <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_image_view_v2" args="/ft/debug/image_v2">
+        <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
+    </node>
+</launch>
