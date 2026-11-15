@@ -62,7 +62,9 @@ public:
         pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
         pnh_.param("hsv_sv_min",   hsv_sv_min_, 100);
-        pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.45);
+        pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
+        pnh_.param("bar_v_min",    bar_v_min_, 160);
+        pnh_.param("bar_keep_n",   bar_keep_n_, 6);
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -98,6 +100,7 @@ private:
         cv::Point2f center;              // 矩质心（抗眩光）
         double tilt;                     // 相对竖直方向
         double long_h;
+        double v;                        // 轮廓内 V 通道平均亮度
         std::vector<cv::Point> contour;
     };
 
@@ -223,6 +226,11 @@ private:
                          morph_size_, hsv_sv_min_,
                          yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_);
 
+            // 亮度筛选用：单独提取 V 通道
+            cv::Mat hsv_full, v_chan;
+            cv::cvtColor(canvas, hsv_full, cv::COLOR_BGR2HSV);
+            cv::extractChannel(hsv_full, v_chan, 2);
+
             const double stamp = msg->header.stamp.toSec();
             int lost_this_frame = 1;
 
@@ -247,6 +255,13 @@ private:
                     double aspect = std::max(w, h) / std::min(w, h);
                     if (aspect < aspect_min_ || aspect > aspect_max_) continue;
 
+                    // 最高亮度过滤：真灯条主动发光，反光达不到这条线
+                    cv::Mat cmask(canvas.size(), CV_8UC1, cv::Scalar(0));
+                    cv::drawContours(cmask, contours, static_cast<int>(i),
+                                     cv::Scalar(255), cv::FILLED);
+                    double mean_v = cv::mean(v_chan, cmask)[0];
+                    if (mean_v < bar_v_min_) continue;
+
                     Bar bar;
                     bar.rr = rr; rr.points(bar.pts);
 
@@ -265,6 +280,7 @@ private:
                     if (tilt < -CV_PI / 2) tilt += CV_PI;
                     bar.tilt = tilt;
                     bar.long_h = std::max(cv::norm(e1), cv::norm(e2));
+                    bar.v = mean_v;
                     bar.contour = contours[i];
 
                     // 补丁4：y 方向 ROI，滤掉画面下部的地面反光
@@ -277,6 +293,12 @@ private:
                         cv::line(canvas, bar.pts[k], bar.pts[(k + 1) % 4],
                                  cv::Scalar(0, 255, 255), 2);
                 }
+
+                // 择优保留：只留最亮的 N 根
+                std::sort(bars.begin(), bars.end(),
+                          [](const Bar& a, const Bar& b) { return a.v > b.v; });
+                if (static_cast<int>(bars.size()) > bar_keep_n_)
+                    bars.resize(bar_keep_n_);
 
                 std::sort(bars.begin(), bars.end(),
                           [](const Bar& a, const Bar& b) {
@@ -344,7 +366,7 @@ private:
                         // 去重：中心距离 <25px 视为同一块板，避免同一根灯条被拆段后重复配对
                         bool dup = false;
                         for (size_t d = 0; d < targets.size(); ++d) {
-                            if (cv::norm(targets[d].center2d - tg.center2d) < 25.0) {
+                            if (cv::norm(targets[d].center2d - tg.center2d) < 60.0) {
                                 dup = true; break;
                             }
                         }
@@ -625,6 +647,7 @@ private:
     int hsv_sv_min_;
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
+    int bar_v_min_, bar_keep_n_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
