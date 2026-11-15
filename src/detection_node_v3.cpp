@@ -61,6 +61,7 @@ public:
         pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
         pnh_.param("hsv_sv_min",   hsv_sv_min_, 150);
+        pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.75);
 
         info_sub_ = nh_.subscribe(
             "/hk_camera/camera_info", 1,
@@ -259,6 +260,11 @@ private:
                     bar.tilt = tilt;
                     bar.long_h = std::max(cv::norm(e1), cv::norm(e2));
                     bar.contour = contours[i];
+
+                    // 补丁4：y 方向 ROI，滤掉画面下部的地面反光
+                    if (roi_y_ratio_ > 0.0 &&
+                        bar.center.y > height_ * roi_y_ratio_) continue;
+
                     bars.push_back(bar);
 
                     for (int k = 0; k < 4; ++k)
@@ -602,6 +608,7 @@ private:
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_, omega_blind_;
     int morph_size_;
     int hsv_sv_min_;
+    double roi_y_ratio_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
