@@ -21,7 +21,9 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
 )
 
-find_package(OpenCV 4.5.5 REQUIRED)
+# ROS Noetic 自带 OpenCV 4.2；/usr/local 另有 4.5.5，混链会 ABI 冲突
+set(OpenCV_DIR "/usr/lib/x86_64-linux-gnu/cmake/opencv4" CACHE PATH "OpenCV 4.2 (ROS Noetic)" FORCE)
+find_package(OpenCV 4 REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -112,6 +114,7 @@ find_package(OpenCV 4.5.5 REQUIRED)
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
+
 catkin_package(
    INCLUDE_DIRS include
    # LIBRARIES final_text
@@ -215,11 +218,6 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
-target_link_libraries(my_node
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBS}  
-)
-
 #add_executable(final_text_node src/xxx.cpp) # 假设代码叫 xxx.cpp
 #add_dependencies(final_text_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 #target_link_libraries(final_text_node
@@ -227,5 +225,9 @@ target_link_libraries(my_node
 #  ${OpenCV_LIBS}
 #)
 
-add_executable(detect_node src/detect_node.cpp)
-target_link_libraries(detect_node ${catkin_LIBRARIES} ${OpenCV_LIBS})
+add_executable(detect_node src/detection_node.cpp)
+
+target_link_libraries(detect_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
