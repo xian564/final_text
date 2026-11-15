@@ -241,3 +241,11 @@ target_link_libraries(detect_node_v2
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+
+# ---- v3：22 点终极升级版（新建文件，不影响 v1/v2） ----
+add_executable(detect_node_v3 src/detection_node_v3.cpp)
+
+target_link_libraries(detect_node_v3
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
