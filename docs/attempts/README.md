@@ -1,0 +1,37 @@
+# 尝试与错误记录（Attempt Log）
+
+本目录记录 `final_text` 视觉节点的每次改动/尝试、报错原文、原因分析与验证结果。
+目的：每次出错都能追溯到「哪个版本、什么命令、什么报错、怎么处理、结果如何」。
+
+## 约定
+
+- 每次尝试一个文件，命名：`YYYY-MM-DD-NN-主题.md`
+- 每个文件必须包含：**版本/提交、命令、报错原文、原因、处理、结果、遗留**
+- 本 README 维护索引；新记录追加到表格末尾
+
+## 索引
+
+| 编号 | 日期 | 主题 | 版本/提交 | 结果 |
+|---|---|---|---|---|
+| 01 | 2026-11-15 | 编译错误 `endl` 未声明 | 用户替换版（未提交） | 用户改为 `std::endl` 后通过 |
+| 02 | 2026-11-15 | 首帧崩溃 `findContours` 类型不符 | 同上 | 崩溃，`ok` 0 次 |
+| 03 | 2026-11-15 | 修复：单通道 mask | `c0995c9` | 通过，50 Hz，红/黄框正常 |
+| 04 | 2026-11-15 | rqt 白屏 / `libGL` 报错 | `c0995c9` 运行环境 | 加 `LIBGL_ALWAYS_SOFTWARE=1` 后正常 |
+| 05 | 2026-11-15 | 形态学核 5×5 → 3×3 | `208713b` | 通过，54 Hz；断裂更可见 |
+
+## 运行环境
+
+- 容器：`myubuntu2004`（`osrf/ros:noetic-desktop-full`，ROS Noetic）
+- 工作空间：`/root/catkin_ws`
+- 数据包：`/root/catkin_ws/bag/red_4.bag`
+
+## 常用验证命令
+
+```bash
+source /opt/ros/noetic/setup.bash && cd /root/catkin_ws && catkin_make
+roscore &
+rosbag play bag/red_4.bag --clock -l &
+LIBGL_ALWAYS_SOFTWARE=1 roslaunch final_text test.launch
+grep -c "^ok$" /tmp/roslaunch.log
+rostopic hz /ft/debug/image
+```
