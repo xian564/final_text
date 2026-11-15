@@ -47,8 +47,8 @@ public:
           has_sent_(false), blind_(false)
     {
         // ---------- 动态参数（22 点之 13） ----------
-        pnh_.param("aspect_min",  aspect_min_, 2.0);
-        pnh_.param("aspect_max",  aspect_max_, 6.0);
+        pnh_.param("aspect_min",  aspect_min_, 1.5);
+        pnh_.param("aspect_max",  aspect_max_, 8.0);
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
         pnh_.param("max_dist_x",  max_dist_x_, 250.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
@@ -61,12 +61,12 @@ public:
         pnh_.param("max_speed",   max_speed_, 8.0);     // 车体物理极限 m/s
         pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
-        pnh_.param("hsv_sv_min",   hsv_sv_min_, 120);
+        pnh_.param("hsv_sv_min",   hsv_sv_min_, 100);
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.45);
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
-        pnh_.param("yellow_s_min", yellow_s_min_, 80);
-        pnh_.param("yellow_v_min", yellow_v_min_, 80);
+        pnh_.param("yellow_s_min", yellow_s_min_, 100);
+        pnh_.param("yellow_v_min", yellow_v_min_, 100);
 
         info_sub_ = nh_.subscribe(
             "/hk_camera/camera_info", 1,
@@ -340,6 +340,15 @@ private:
                                                   (min_y + max_y) * 0.5f);
                         tg.has_pose = false;
                         tg.z = -1.0;
+
+                        // 去重：中心距离 <25px 视为同一块板，避免同一根灯条被拆段后重复配对
+                        bool dup = false;
+                        for (size_t d = 0; d < targets.size(); ++d) {
+                            if (cv::norm(targets[d].center2d - tg.center2d) < 25.0) {
+                                dup = true; break;
+                            }
+                        }
+                        if (dup) continue;
 
                         // ---------- solvePnP ----------
                         if (K_.rows == 3 && K_.cols == 3) {
