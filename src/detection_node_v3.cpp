@@ -565,6 +565,7 @@ private:
                         has_last_ = false; has_sent_ = false;
                         pos_queue_.clear(); yaw_queue_.clear();
                         size_hist_.clear(); yaw_hist_.clear();
+                        lost_frames_ = 0;
                     }
                 }
             } else {
