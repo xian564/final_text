@@ -135,7 +135,10 @@ private:
                 // 2. 找轮廓，按比例过滤，并记录合格的灯条
                 // =======================================================
                 std::vector<std::vector<cv::Point>> contours;
-                cv::findContours(colored, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+                // 修复：findContours 只接受 CV_8UC1，colored 是 BGR，先转成单通道 mask
+                cv::Mat seg_mask;
+                cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
+                cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
                 for (size_t i = 0; i < contours.size(); ++i) {
                     if (cv::contourArea(contours[i]) < 20) continue; 
