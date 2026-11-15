@@ -32,7 +32,7 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
                          const cv::Scalar& lo_r, const cv::Scalar& hi_r,
                          const cv::Scalar& lo_b, const cv::Scalar& hi_b,
                          const cv::Scalar& lo_g, const cv::Scalar& hi_g,
-                         int morph_size);
+                         int morph_size, int sv_min);
 
 // ============================================================
 //  A. VisionNodeV3：ROS 节点
@@ -49,6 +49,7 @@ public:
         pnh_.param("aspect_min",  aspect_min_, 2.0);
         pnh_.param("aspect_max",  aspect_max_, 6.0);
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
+        pnh_.param("max_dist_x",  max_dist_x_, 250.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
         pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
         pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
@@ -59,6 +60,7 @@ public:
         pnh_.param("max_speed",   max_speed_, 8.0);     // 车体物理极限 m/s
         pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
+        pnh_.param("hsv_sv_min",   hsv_sv_min_, 150);
 
         info_sub_ = nh_.subscribe(
             "/hk_camera/camera_info", 1,
@@ -209,10 +211,10 @@ private:
 
             cv::Mat colored;
             colorSegment(canvas, colored,
-                         cv::Scalar(0, 100, 100), cv::Scalar(10, 255, 255),
-                         cv::Scalar(110, 50, 50), cv::Scalar(130, 255, 255),
-                         cv::Scalar(50, 100, 100), cv::Scalar(70, 255, 255),
-                         morph_size_);
+                         cv::Scalar(0, hsv_sv_min_, hsv_sv_min_), cv::Scalar(10, 255, 255),
+                         cv::Scalar(110, hsv_sv_min_, hsv_sv_min_), cv::Scalar(130, 255, 255),
+                         cv::Scalar(50, hsv_sv_min_, hsv_sv_min_), cv::Scalar(70, 255, 255),
+                         morph_size_, hsv_sv_min_);
 
             const double stamp = msg->header.stamp.toSec();
             int lost_this_frame = 1;
@@ -278,8 +280,8 @@ private:
                 for (size_t i = 0; i < bars.size(); ++i) {
                     for (size_t j = i + 1; j < bars.size(); ++j) {
                         double dx = bars[j].center.x - bars[i].center.x;
-                        if (dx > 400) break;
-                        if (dx <= min_dist_x_) continue;                 // 防碎渣
+                        // 补丁1：绝对距离拦截（>250 或 <15 一律不配对）
+                        if (dx > max_dist_x_ || dx <= min_dist_x_) continue;
                         if (std::abs(bars[i].center.y - bars[j].center.y) > 50) continue;
 
                         double ddeg = std::abs(bars[i].tilt - bars[j].tilt)
@@ -595,10 +597,11 @@ private:
 
     // 动态参数（22 点之 13）
     double aspect_min_, aspect_max_;
-    double min_dist_x_, max_angle_diff_;
+    double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_, omega_blind_;
     int morph_size_;
+    int hsv_sv_min_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
@@ -634,7 +637,7 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
                          const cv::Scalar& lo_r, const cv::Scalar& hi_r,
                          const cv::Scalar& lo_b, const cv::Scalar& hi_b,
                          const cv::Scalar& lo_g, const cv::Scalar& hi_g,
-                         int morph_size) {
+                         int morph_size, int sv_min) {
     if (bgr.empty()) { res = cv::Mat(); return; }
 
     cv::Mat hsv;
@@ -642,7 +645,7 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
 
     cv::inRange(hsv, lo_r, hi_r, mask_r1);
-    cv::inRange(hsv, cv::Scalar(170, 100, 100), cv::Scalar(179, 255, 255), mask_r2);
+    cv::inRange(hsv, cv::Scalar(170, sv_min, sv_min), cv::Scalar(179, 255, 255), mask_r2);
     cv::bitwise_or(mask_r1, mask_r2, mask_r);
 
     cv::inRange(hsv, lo_b, hi_b, mask_b);
