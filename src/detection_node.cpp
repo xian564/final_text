@@ -331,7 +331,7 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res) {
     cv::bitwise_or(mask_all, mask_g, mask_all);
 
     // 去噪
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
     cv::morphologyEx(mask_all, mask_all, cv::MORPH_OPEN, kernel);
 
     // 保留原图彩色区域
