@@ -64,6 +64,17 @@ public:
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
+        pnh_.param("break_filter", break_filter_, false);
+        pnh_.param("break_aspect_max", break_aspect_max_, 8.0);
+        pnh_.param("debug_split",  debug_split_, false);
+        pnh_.param("select_mode",  select_mode_, 1);   // 0=中位数 1=历史最近
+        pnh_.param("bar_h_diff",   bar_h_diff_, 0.35);
+        pnh_.param("fill_enable",  fill_enable_, true);   // 丢帧推断补位
+        pnh_.param("fill_max",     fill_max_, 2);
+        pnh_.param("fill_angle_gain", fill_angle_gain_, 0.5);
+        pnh_.param("fill_step_max", fill_step_max_, 60.0);   // 单帧预测位移上限 px
+        pnh_.param("fill_drift_max", fill_drift_max_, 240.0); // 累计漂移上限 px
+        pnh_.param("fill_jump_max", fill_jump_max_, 200.0);  // 上一帧跳变则禁补
         pnh_.param("z_median_win", z_median_win_, 13);
                 pnh_.param("max_z_jump",    max_z_jump_, 1.5);
         pnh_.param("near_area",    near_area_, 3000);
@@ -75,9 +86,9 @@ public:
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
         pnh_.param("fcs_four_span", fcs_four_span_, 30.0);
         pnh_.param("fcs_four_tol",  fcs_four_tol_, 60.0);
-        pnh_.param("blue_h_min",   blue_h_min_, 100);
+        pnh_.param("blue_h_min",   blue_h_min_, 85);
         pnh_.param("blue_h_max",   blue_h_max_, 140);
-        pnh_.param("blue_s_min",   blue_s_min_, 50);
+        pnh_.param("blue_s_min",   blue_s_min_, 30);
         pnh_.param("blue_v_min",   blue_v_min_, 50);
         pnh_.param("white_v_min",  white_v_min_, 240);
         pnh_.param("white_s_max",  white_s_max_, 30);
@@ -107,6 +118,8 @@ public:
 
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise("/ft/debug/image", 1);
+        red_pub_   = it_.advertise("/ft/debug/red", 1);
+        blue_pub_  = it_.advertise("/ft/debug/blue", 1);
     }
 
     bool isReady() const {
@@ -320,6 +333,10 @@ private:
                     cv::bitwise_and(seg_mask, em, seg_mask);
                 }
 
+                // 连笔：灯条是竖直的，先做 1x5 竖向闭运算把断点接上
+                cv::morphologyEx(seg_mask, seg_mask, cv::MORPH_CLOSE,
+                                 cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 5)));
+
                 cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL,
                                  cv::CHAIN_APPROX_SIMPLE);
 
@@ -385,9 +402,7 @@ private:
 
                     bars.push_back(bar);
 
-                    for (int k = 0; k < 4; ++k)
-                        cv::line(canvas, bar.pts[k], bar.pts[(k + 1) % 4],
-                                 cv::Scalar(0, 255, 255), 2);
+
                 }
 
                 // 断笔重连：共线且竖直方向相邻的短灯条合并
@@ -429,6 +444,21 @@ private:
                     }
                 }
 
+                if (break_filter_) {
+                    std::vector<Bar> keep2;
+                    for (size_t i = 0; i < bars.size(); ++i) {
+                        double h = bars[i].long_h;
+                        double w = std::max(1.0, cv::norm(bars[i].pts[1] - bars[i].pts[0]));
+                        if (h / w > break_aspect_max_) continue;   // 断点过多/断缝过大
+                        keep2.push_back(bars[i]);
+                    }
+                    bars.swap(keep2);
+                }
+                for (size_t i = 0; i < bars.size(); ++i)
+                    for (int k = 0; k < 4; ++k)
+                        cv::line(canvas, bars[i].pts[k], bars[i].pts[(k + 1) % 4],
+                                 cv::Scalar(0, 255, 255), 2);
+
                 // 择优保留：只留最亮的 N 根
                 std::sort(bars.begin(), bars.end(),
                           [](const Bar& a, const Bar& b) { return a.v > b.v; });
@@ -461,6 +491,10 @@ private:
                         double corrected = dx / std::max(0.2, std::abs(std::cos(avg_angle)));
                         double long_h = std::max(bars[i].long_h, bars[j].long_h);
                         if (long_h < 1.0) continue;
+                        double hmin = std::min(bars[i].long_h, bars[j].long_h);
+                        double hmax = std::max(bars[i].long_h, bars[j].long_h);
+                        if (bar_h_diff_ > 0.0 && hmax > 1.0 &&
+                            (hmax - hmin) / hmax > bar_h_diff_) continue;
                         double ratio = corrected / long_h;
                         if (ratio > ratio_l_max_ || ratio < ratio_min_) continue; // 幽灵
 
@@ -545,6 +579,42 @@ private:
 
                         targets.push_back(tg);
                     }
+                }
+
+                // ---- 目标选择：取中间那块（候选中心 x 的中位数最近者）----
+                if (!targets.empty()) {
+                    std::vector<int> cand;
+                    for (size_t k = 0; k < targets.size(); ++k) {
+                        if (prev_had_target_ &&
+                            cv::norm(targets[k].center2d - prev_center2d_) > 400.0)
+                            continue;
+                        cand.push_back((int)k);
+                    }
+                    if (cand.empty()) cand.push_back(0);
+                    std::vector<float> xs;
+                    for (size_t q = 0; q < cand.size(); ++q)
+                        xs.push_back(targets[cand[q]].center2d.x);
+                    int pick = cand[0];
+                    if (select_mode_ == 1 && prev_had_target_) {
+                        // 历史最近：同一辆车内离上一帧中心最近的那块
+                        float best = 1e9f;
+                        for (size_t q = 0; q < cand.size(); ++q) {
+                            float d = (float)cv::norm(targets[cand[q]].center2d - prev_center2d_);
+                            if (d < best) { best = d; pick = cand[q]; }
+                        }
+                    } else {
+                        // 中位数：取几何中间那块
+                        std::sort(xs.begin(), xs.end());
+                        float midx = xs[xs.size() / 2];
+                        float best = 1e9f;
+                        for (size_t q = 0; q < cand.size(); ++q) {
+                            float d = std::abs(targets[cand[q]].center2d.x - midx);
+                            if (d < best) { best = d; pick = cand[q]; }
+                        }
+                    }
+                    Target keep = targets[pick];
+                    targets.clear();
+                    targets.push_back(keep);
                 }
 
                 // =======================================================
@@ -833,9 +903,27 @@ private:
                             by2 = std::max(by2, (int)mt.corners[k].y);
                         }
                         cv::Rect mr(bx1, by1, std::max(1, bx2 - bx1), std::max(1, by2 - by1));
+                        prev_prev_center2d_ = prev_center2d_;
+                        has_prev2_ = prev_had_target_;
+                        if (fill_pred_valid_) {
+                            double fd = cv::norm(mt.center2d - fill_pred_);
+                            if (fd > 120.0)
+                                ROS_INFO_THROTTLE(0.5, "[FILLERR] 补位偏差 %.0f px", fd);
+                            fill_pred_valid_ = false;
+                        }
                         prev_had_target_ = true;
                         prev_id_ = mt.id;
                         prev_is_large_ = mt.is_large;
+                        prev_fill_yaw_ = last_fill_yaw_;
+                        prev_fill_stamp_ = last_fill_stamp_;
+                        last_fill_yaw_ = mt.yaw;
+                        last_fill_stamp_ = stamp;
+                        last_fill_t_ = cv::Vec3d(mt.t[0], -mt.t[1], mt.t[2]);
+                        last_fill_vc_ = vc;
+                        last_fill_w_ = (int)(mt.corners[1].x - mt.corners[0].x);
+                        last_fill_h_ = (int)(mt.corners[3].y - mt.corners[0].y);
+                        has_fill_ = true;
+                        fill_count_ = 0;
                         prev_center2d_ = mt.center2d;
                         prev_stamp_ = stamp;
                         prev_aspect_ = (double)std::max(mr.width, mr.height) /
@@ -952,6 +1040,64 @@ private:
                     // ===================================================
                     // 模块6：目标丢失重捕与残影补位（FCS）
                     // ===================================================
+                    // ---- 丢帧推断：车体中心 + 旋转方向/角速度补位 ----
+                    bool filled = false;
+                    if (fill_enable_ && has_fill_ && prev_had_target_ &&
+                        fill_count_ < fill_max_) {
+                        double dt = stamp - last_fill_stamp_;
+                        if (dt <= 1e-3 || dt > 0.5) dt = 0.033;
+                        double omega = 0.0;
+                        double hdt = last_fill_stamp_ - prev_fill_stamp_;
+                        if (hdt > 1e-3 && hdt < 1.0) {
+                            double dy = last_fill_yaw_ - prev_fill_yaw_;
+                            while (dy > CV_PI) dy -= 2 * CV_PI;
+                            while (dy < -CV_PI) dy += 2 * CV_PI;
+                            omega = dy / hdt;
+                        }
+                        double ang = omega * dt * fill_angle_gain_;
+                        cv::Point2f rel = prev_center2d_ - last_fill_vc_;
+                        cv::Point2f pred(last_fill_vc_.x + rel.x * std::cos(ang) - rel.y * std::sin(ang),
+                                         last_fill_vc_.y + rel.x * std::sin(ang) + rel.y * std::cos(ang));
+                        if (!std::isfinite(omega) || std::abs(omega) > 720.0) {
+                            fill_count_ = fill_max_;
+                            ROS_INFO_THROTTLE(0.5, "[FILL] 抑制 omega=%.0f", omega);
+                        }
+                        if (fill_count_ == 0) fill_start_center_ = prev_center2d_;
+                        double step = cv::norm(pred - prev_center2d_);
+                        double drift = cv::norm(pred - fill_start_center_);
+                        bool jumpy = has_prev2_ &&
+                                     cv::norm(prev_center2d_ - prev_prev_center2d_) > fill_jump_max_;
+                        if (step > fill_step_max_ || drift > fill_drift_max_ || jumpy) {
+                            ROS_INFO_THROTTLE(0.5, "[FILL] 抑制 step=%.0f drift=%.0f jump=%d",
+                                              step, drift, (int)jumpy);
+                            fill_count_ = fill_max_;
+                        } else {
+                        cv::Rect pr((int)pred.x - last_fill_w_ / 2, (int)pred.y - last_fill_h_ / 2,
+                                    last_fill_w_, last_fill_h_);
+                        dashedRect(canvas, pr, cv::Scalar(255, 0, 255), 2);
+                        cv::putText(canvas, "FILL " + std::to_string(fill_count_ + 1),
+                                    cv::Point(pr.x, std::max(0, pr.y - 8)),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 255), 1);
+                        geometry_msgs::TransformStamped ts2;
+                        ts2.header.stamp = msg->header.stamp;
+                        ts2.header.frame_id = camera_frame_;
+                        ts2.child_frame_id = "armor_v3";
+                        ts2.transform.translation.x = last_fill_t_[0];
+                        ts2.transform.translation.y = -last_fill_t_[1];
+                        ts2.transform.translation.z = last_fill_t_[2];
+                        tf2::Quaternion q2; q2.setRPY(0, 0, last_fill_yaw_ + ang);
+                        ts2.transform.rotation.x = q2.x(); ts2.transform.rotation.y = q2.y();
+                        ts2.transform.rotation.z = q2.z(); ts2.transform.rotation.w = q2.w();
+                        tf_broadcaster_.sendTransform(ts2);
+                        prev_center2d_ = pred;
+                        fill_pred_ = pred;
+                        fill_pred_valid_ = true;
+                        ++fill_count_;
+                        filled = true;
+                        }
+                        ROS_INFO_THROTTLE(0.5, "[FILL] 丢帧推断 %d/%d", fill_count_, fill_max_);
+                    }
+
                     bool fcs_ok = false;
                     double dt_fcs = stamp - prev_stamp_;
                     if (prev_had_target_ && bars.size() <= 2 &&
@@ -1016,7 +1162,7 @@ private:
                         }
                     }
 
-                    if (!fcs_ok) {
+                    if (!fcs_ok && !filled) {
                         ++lost_frames_;
                         ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
                         if (lost_frames_ >= 5) {
@@ -1038,6 +1184,24 @@ private:
                             cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
             }
 
+            if (debug_split_) {
+                cv::Mat r1, r2, rmask, bmask;
+                cv::inRange(hsv_full, cv::Scalar(0, 80, 80), cv::Scalar(10, 255, 255), r1);
+                cv::inRange(hsv_full, cv::Scalar(170, 80, 80), cv::Scalar(179, 255, 255), r2);
+                cv::bitwise_or(r1, r2, rmask);
+                cv::inRange(hsv_full, cv::Scalar(100, 40, 40),
+                            cv::Scalar(140, 255, 255), bmask);
+                cv::Mat rv(img.size(), CV_8UC3, cv::Scalar(0));
+                cv::Mat bv(img.size(), CV_8UC3, cv::Scalar(0));
+                img.copyTo(rv, rmask);
+                img.copyTo(bv, bmask);
+                cv_bridge::CvImage ro, bo;
+                ro.header = msg->header; ro.encoding = "bgr8"; ro.image = rv;
+                bo.header = msg->header; bo.encoding = "bgr8"; bo.image = bv;
+                red_pub_.publish(ro.toImageMsg());
+                blue_pub_.publish(bo.toImageMsg());
+            }
+
             cv_bridge::CvImage out_img;
             out_img.header.stamp = msg->header.stamp;
             out_img.header.frame_id = msg->header.frame_id;
@@ -1057,6 +1221,8 @@ private:
     ros::Subscriber info_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
+    image_transport::Publisher red_pub_;
+    image_transport::Publisher blue_pub_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
     // 动态参数（22 点之 13）
@@ -1106,6 +1272,18 @@ private:
     int         prev_id_ = 0;
     bool        prev_is_large_ = false;
     cv::Point2f prev_center2d_ = cv::Point2f(0, 0);
+    cv::Point2f prev_prev_center2d_ = cv::Point2f(0, 0);
+    bool        has_prev2_ = false;
+    bool        has_fill_ = false;
+    int         fill_count_ = 0;
+    cv::Vec3d   last_fill_t_ = cv::Vec3d(0, 0, 0);
+    double      last_fill_yaw_ = 0, prev_fill_yaw_ = 0;
+    double      last_fill_stamp_ = 0, prev_fill_stamp_ = 0;
+    cv::Point2f last_fill_vc_ = cv::Point2f(0, 0);
+    int         last_fill_w_ = 0, last_fill_h_ = 0;
+    cv::Point2f fill_start_center_ = cv::Point2f(0, 0);
+    cv::Point2f fill_pred_ = cv::Point2f(0, 0);
+    bool        fill_pred_valid_ = false;
     double      prev_stamp_ = 0.0;
     double      prev_aspect_ = 2.0;
     double      prev_grad_ = 0.0;
@@ -1117,6 +1295,14 @@ private:
 
     std::atomic<bool> is_ready_;
     bool transport_ready_;
+    bool break_filter_, debug_split_;
+    int    select_mode_;
+    double bar_h_diff_;
+    bool   fill_enable_;
+    int    fill_max_;
+    double fill_step_max_, fill_drift_max_, fill_jump_max_;
+    double fill_angle_gain_;
+    double break_aspect_max_;
 
     cv::Mat K_, D_;
     int width_ = 0, height_ = 0;
