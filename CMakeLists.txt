@@ -27,6 +27,8 @@ find_package(catkin REQUIRED COMPONENTS
 set(OpenCV_DIR "/usr/lib/x86_64-linux-gnu/cmake/opencv4" CACHE PATH "OpenCV 4.2 (ROS Noetic)" FORCE)
 find_package(OpenCV 4 REQUIRED)
 
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
