@@ -65,6 +65,9 @@ public:
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
+        pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
+        pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
+        pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -231,10 +234,26 @@ private:
             cv::cvtColor(canvas, hsv_full, cv::COLOR_BGR2HSV);
             cv::extractChannel(hsv_full, v_chan, 2);
 
+            // 1) 全图最高光定位
+            double max_v = 0.0;
+            cv::Point max_loc;
+            cv::minMaxLoc(v_chan, nullptr, &max_v, nullptr, &max_loc);
+
+            // 2) 全局空间守卫：最亮点在画面极底部 -> 大概率地面反光
+            bool guard_block = (max_loc.y > height_ * guard_y_ratio_);
+            if (guard_block) {
+                ROS_INFO_THROTTLE(1.0, "[Guard] 最亮点在底部 y=%d, 跳过本帧", max_loc.y);
+            }
+
+            // 3) 动态高亮掩膜（解决过曝）
+            double dyn_v_thresh = std::max(180.0, max_v - dyn_v_offset_);
+            cv::Mat high_mask;
+            cv::compare(v_chan, dyn_v_thresh, high_mask, cv::CMP_GT);
+
             const double stamp = msg->header.stamp.toSec();
             int lost_this_frame = 1;
 
-            if (!colored.empty()) {
+            if (!colored.empty() && !guard_block) {
                 // 显示用底板：保留原始相机画面（不再用分割结果覆盖成黑底）
                 // canvas 仍是 img.clone() + 绿框，检测/绘制都叠加在原视频上
                 // =======================================================
@@ -244,6 +263,18 @@ private:
                 std::vector<std::vector<cv::Point>> contours;
                 cv::Mat seg_mask;
                 cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
+
+                // 3) 过曝中心融合：颜色区域膨胀后与高亮 mask 相交，再并入分割 mask
+                if (!high_mask.empty()) {
+                    cv::Mat color_mask, color_dil, high_fused;
+                    cv::threshold(seg_mask, color_mask, 1, 255, cv::THRESH_BINARY);
+                    cv::Mat k3 = cv::getStructuringElement(cv::MORPH_RECT,
+                                                           cv::Size(3, 3));
+                    cv::dilate(color_mask, color_dil, k3, cv::Point(-1, -1), 2);
+                    cv::bitwise_and(high_mask, color_dil, high_fused);
+                    cv::bitwise_or(seg_mask, high_fused, seg_mask);
+                }
+
                 cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL,
                                  cv::CHAIN_APPROX_SIMPLE);
 
@@ -360,6 +391,10 @@ private:
                         tg.corners.push_back(cv::Point2f(min_x, max_y));
                         tg.center2d = cv::Point2f((min_x + max_x) * 0.5f,
                                                   (min_y + max_y) * 0.5f);
+
+                        // 4) 相对位置验证：配对中心必须在中上部
+                        if (pair_y_ratio_ > 0.0 &&
+                            tg.center2d.y > height_ * pair_y_ratio_) continue;
                         tg.has_pose = false;
                         tg.z = -1.0;
 
@@ -648,6 +683,7 @@ private:
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
+    double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
