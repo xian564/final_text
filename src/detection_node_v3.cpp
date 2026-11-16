@@ -70,6 +70,15 @@ public:
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
         pnh_.param("fcs_four_span", fcs_four_span_, 30.0);
         pnh_.param("fcs_four_tol",  fcs_four_tol_, 60.0);
+        pnh_.param("blue_h_min",   blue_h_min_, 100);
+        pnh_.param("blue_h_max",   blue_h_max_, 140);
+        pnh_.param("blue_s_min",   blue_s_min_, 50);
+        pnh_.param("blue_v_min",   blue_v_min_, 50);
+        pnh_.param("white_v_min",  white_v_min_, 240);
+        pnh_.param("white_s_max",  white_s_max_, 30);
+        pnh_.param("white_area_min", white_area_min_, 500);
+        pnh_.param("white_aspect_min", white_aspect_min_, 1.3);
+        pnh_.param("white_aspect_max", white_aspect_max_, 6.0);
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -261,7 +270,7 @@ private:
             cv::Mat colored;
             colorSegment(canvas, colored,
                          cv::Scalar(0, hsv_sv_min_, hsv_sv_min_), cv::Scalar(10, 255, 255),
-                         cv::Scalar(110, hsv_sv_min_, hsv_sv_min_), cv::Scalar(130, 255, 255),
+                         cv::Scalar(blue_h_min_, blue_s_min_, blue_v_min_), cv::Scalar(blue_h_max_, 255, 255),
                          cv::Scalar(50, hsv_sv_min_, hsv_sv_min_), cv::Scalar(70, 255, 255),
                          morph_size_, hsv_sv_min_,
                          yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_);
@@ -709,6 +718,100 @@ private:
                     }
                 } else {
                     // ===================================================
+                    // 纯白掩膜兜底：两条白灯条强行配对
+                    // ===================================================
+                    bool white_ok = false;
+                    {
+                        cv::Mat white_mask;
+                        cv::inRange(hsv_full,
+                                    cv::Scalar(0, 0, white_v_min_),
+                                    cv::Scalar(180, white_s_max_, 255),
+                                    white_mask);
+                        std::vector<std::vector<cv::Point> > wcnts;
+                        cv::findContours(white_mask, wcnts, cv::RETR_EXTERNAL,
+                                         cv::CHAIN_APPROX_SIMPLE);
+                        struct WB { cv::Point2f c; double tilt, long_h, ratio; std::vector<cv::Point> cnt; };
+                        std::vector<WB> wb;
+                        for (size_t wi = 0; wi < wcnts.size(); ++wi) {
+                            if (cv::contourArea(wcnts[wi]) < white_area_min_) continue;
+                            cv::RotatedRect rr = cv::minAreaRect(wcnts[wi]);
+                            double w = rr.size.width, h = rr.size.height;
+                            if (std::min(w, h) <= 0) continue;
+                            double asp = std::max(w, h) / std::min(w, h);
+                            if (asp < white_aspect_min_ || asp > white_aspect_max_) continue;
+                            cv::Moments m = cv::moments(wcnts[wi]);
+                            if (std::abs(m.m00) < 1e-6) continue;
+                            cv::Point2f pts[4]; rr.points(pts);
+                            cv::Point2f e1 = pts[1] - pts[0], e2 = pts[2] - pts[1];
+                            cv::Point2f lv = (cv::norm(e1) >= cv::norm(e2)) ? e1 : e2;
+                            double tilt = std::atan2(lv.x, lv.y);
+                            if (tilt > CV_PI / 2) tilt -= CV_PI;
+                            if (tilt < -CV_PI / 2) tilt += CV_PI;
+                            WB b;
+                            b.c = cv::Point2f((float)(m.m10 / m.m00), (float)(m.m01 / m.m00));
+                            b.tilt = tilt;
+                            b.long_h = std::max(cv::norm(e1), cv::norm(e2));
+                            b.ratio = asp;
+                            b.cnt = wcnts[wi];
+                            wb.push_back(b);
+                        }
+                        if (wb.size() == 2) {
+                            double dx = std::abs(wb[1].c.x - wb[0].c.x);
+                            double dy = std::abs(wb[1].c.y - wb[0].c.y);
+                            double ddeg = std::abs(wb[0].tilt - wb[1].tilt) * 180.0 / CV_PI;
+                            double ang = 0.5 * (wb[0].tilt + wb[1].tilt);
+                            double corrected = dx / std::max(0.2, std::abs(std::cos(ang)));
+                            double lh = std::max(wb[0].long_h, wb[1].long_h);
+                            double ratio = corrected / std::max(1.0, lh);
+                            if (dx > 15 && dx <= 300 && dy <= 60 && ddeg < 12 &&
+                                ratio >= 0.4 && ratio <= 2.5) {
+                                cv::Rect b0 = cv::boundingRect(wb[0].cnt);
+                                cv::Rect b1 = cv::boundingRect(wb[1].cnt);
+                                int min_x = std::min(b0.x, b1.x);
+                                int min_y = std::min(b0.y, b1.y);
+                                int max_x = std::max(b0.x + b0.width, b1.x + b1.width);
+                                int max_y = std::max(b0.y + b0.height, b1.y + b1.height);
+                                bool is_large = ratio > 1.3;
+                                int wid = prev_had_target_ ? prev_id_ : 1;
+
+                                for (int s2 = 0; s2 < 2; ++s2) {
+                                    const std::vector<cv::Point>& cc = (s2 == 0) ? wb[0].cnt : wb[1].cnt;
+                                    cv::RotatedRect rr2 = cv::minAreaRect(cc);
+                                    cv::Point2f p2[4]; rr2.points(p2);
+                                    for (int k = 0; k < 4; ++k)
+                                        cv::line(canvas, p2[k], p2[(k + 1) % 4],
+                                                 cv::Scalar(0, 255, 255), 2);
+                                }
+                                cv::rectangle(canvas, cv::Rect(min_x, min_y,
+                                                               max_x - min_x, max_y - min_y),
+                                              cv::Scalar(0, 0, 255), 2);
+                                cv::putText(canvas,
+                                            "[WHITE] ID:" + std::to_string(wid) +
+                                            (is_large ? " L" : " S"),
+                                            cv::Point(min_x, std::max(0, min_y - 8)),
+                                            cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                                            cv::Scalar(0, 255, 255), 2);
+                                ROS_INFO_THROTTLE(0.5, "[WHITE] 白场兜底配对 ratio=%.2f", ratio);
+
+                                prev_had_target_ = true;
+                                prev_id_ = wid;
+                                prev_is_large_ = is_large;
+                                prev_center2d_ = cv::Point2f((min_x + max_x) * 0.5f,
+                                                             (min_y + max_y) * 0.5f);
+                                prev_stamp_ = stamp;
+                                prev_aspect_ = (double)std::max(max_x - min_x, max_y - min_y) /
+                                               std::max(1, std::min(max_x - min_x, max_y - min_y));
+                                prev_grad_ = brightGradient(v_chan,
+                                                cv::Rect(min_x, min_y, max_x - min_x, max_y - min_y));
+                                fourBrightness(v_chan,
+                                    cv::Rect(min_x, min_y, max_x - min_x, max_y - min_y), prev_four_);
+                                white_ok = true;
+                                lost_frames_ = 0;
+                            }
+                        }
+                    }
+
+                    // ===================================================
                     // 模块6：目标丢失重捕与残影补位（FCS）
                     // ===================================================
                     bool fcs_ok = false;
@@ -829,6 +932,9 @@ private:
     int bar_v_min_, bar_keep_n_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
+    int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
+    int white_v_min_, white_s_max_, white_area_min_;
+    double white_aspect_min_, white_aspect_max_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
