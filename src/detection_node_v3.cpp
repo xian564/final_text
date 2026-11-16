@@ -47,10 +47,10 @@ public:
           has_sent_(false), blind_(false)
     {
         // ---------- 动态参数（22 点之 13） ----------
-        pnh_.param("aspect_min",  aspect_min_, 2.0);
+        pnh_.param("aspect_min",  aspect_min_, 1.3);
         pnh_.param("aspect_max",  aspect_max_, 6.0);
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
-        pnh_.param("max_dist_x",  max_dist_x_, 300.0);
+        pnh_.param("max_dist_x",  max_dist_x_, 500.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
         pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
         pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
@@ -66,7 +66,11 @@ public:
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
         pnh_.param("z_median_win", z_median_win_, 13);
-        pnh_.param("max_z_jump",    max_z_jump_, 1.5);
+                pnh_.param("max_z_jump",    max_z_jump_, 1.5);
+        pnh_.param("near_area",    near_area_, 3000);
+        pnh_.param("near_sv",      near_sv_, 30);
+        pnh_.param("edge_fuse",    edge_fuse_, false);
+        pnh_.param("merge_bars",   merge_bars_, true);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
@@ -324,8 +328,41 @@ private:
                     cv::bitwise_or(seg_mask, high_fused, seg_mask);
                 }
 
+                if (edge_fuse_) {
+                    cv::Mat gray, edges, sx, absx, em;
+                    cv::cvtColor(canvas, gray, cv::COLOR_BGR2GRAY);
+                    cv::Canny(gray, edges, 60, 160);
+                    cv::Sobel(gray, sx, CV_16S, 1, 0, 3);
+                    cv::convertScaleAbs(sx, absx);
+                    cv::threshold(absx, em, 60, 255, cv::THRESH_BINARY);
+                    cv::bitwise_or(edges, em, em);
+                    cv::dilate(em, em, cv::getStructuringElement(cv::MORPH_RECT,
+                                                                 cv::Size(3, 3)));
+                    cv::bitwise_and(seg_mask, em, seg_mask);
+                }
+
                 cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL,
                                  cv::CHAIN_APPROX_SIMPLE);
+
+                // 近战自适应：最大颜色轮廓足够大 -> 用更低 S/V 重分割一次
+                double max_c_area = 0;
+                for (size_t ci = 0; ci < contours.size(); ++ci)
+                    max_c_area = std::max(max_c_area, cv::contourArea(contours[ci]));
+                if (max_c_area > near_area_) {
+                    cv::Mat colored2;
+                    colorSegment(canvas, colored2,
+                                 cv::Scalar(0, near_sv_, near_sv_), cv::Scalar(10, 255, 255),
+                                 cv::Scalar(blue_h_min_, near_sv_, near_sv_), cv::Scalar(blue_h_max_, 255, 255),
+                                 cv::Scalar(50, near_sv_, near_sv_), cv::Scalar(70, 255, 255),
+                                 morph_size_, near_sv_,
+                                 yellow_h_min_, yellow_h_max_, near_sv_, near_sv_);
+                    cv::bitwise_or(colored, colored2, colored);
+                    cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
+                    cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL,
+                                     cv::CHAIN_APPROX_SIMPLE);
+                    ROS_INFO_THROTTLE(1.0, "[Near] 近战重分割 (area=%.0f, S/V=%d)",
+                                      max_c_area, near_sv_);
+                }
 
                 for (size_t i = 0; i < contours.size(); ++i) {
                     if (cv::contourArea(contours[i]) < 20) continue;
@@ -372,6 +409,45 @@ private:
                     for (int k = 0; k < 4; ++k)
                         cv::line(canvas, bar.pts[k], bar.pts[(k + 1) % 4],
                                  cv::Scalar(0, 255, 255), 2);
+                }
+
+                // 断笔重连：共线且竖直方向相邻的短灯条合并
+                if (merge_bars_) {
+                    bool merged_any = true;
+                    while (merged_any) {
+                        merged_any = false;
+                        for (size_t i = 0; i < bars.size() && !merged_any; ++i) {
+                            for (size_t j = i + 1; j < bars.size(); ++j) {
+                                if (std::abs(bars[i].center.x - bars[j].center.x) > 18.0)
+                                    continue;
+                                double h1 = bars[i].long_h, h2 = bars[j].long_h;
+                                if (std::min(h1, h2) < 0.5 * std::max(h1, h2)) continue;
+                                double t1 = bars[i].center.y - h1 * 0.5;
+                                double b1 = bars[i].center.y + h1 * 0.5;
+                                double t2 = bars[j].center.y - h2 * 0.5;
+                                double b2 = bars[j].center.y + h2 * 0.5;
+                                double gap = std::max(t1, t2) - std::min(b1, b2);
+                                if (gap > 0.6 * std::max(h1, h2)) continue;
+
+                                std::vector<cv::Point> all = bars[i].contour;
+                                all.insert(all.end(), bars[j].contour.begin(), bars[j].contour.end());
+                                cv::RotatedRect rr = cv::minAreaRect(all);
+                                cv::Point2f pts[4]; rr.points(pts);
+                                bars[i].rr = rr;
+                                for (int k = 0; k < 4; ++k) bars[i].pts[k] = pts[k];
+                                bars[i].contour = all;
+                                bars[i].center = cv::Point2f((t1 + std::min(b1, b2)) * 0.5f,
+                                                             (t1 + std::min(b1, b2)) * 0.5f);
+                                bars[i].center = cv::Point2f(
+                                    (bars[i].rr.center.x), (bars[i].rr.center.y));
+                                bars[i].long_h = std::max(b1, b2) - std::min(t1, t2);
+                                bars[i].v = std::max(bars[i].v, bars[j].v);
+                                bars.erase(bars.begin() + j);
+                                merged_any = true;
+                                break;
+                            }
+                        }
+                    }
                 }
 
                 // 择优保留：只留最亮的 N 根
@@ -967,6 +1043,8 @@ private:
     int bar_v_min_, bar_keep_n_;
     int z_median_win_;
     double max_z_jump_;
+    int    near_area_, near_sv_;
+    bool   edge_fuse_, merge_bars_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
