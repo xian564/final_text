@@ -79,6 +79,7 @@ public:
         pnh_.param("white_area_min", white_area_min_, 500);
         pnh_.param("white_aspect_min", white_aspect_min_, 1.3);
         pnh_.param("white_aspect_max", white_aspect_max_, 6.0);
+        pnh_.param("white_enable", white_enable_, false);   // 极端场景才开，默认关闭
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -721,7 +722,8 @@ private:
                     // 纯白掩膜兜底：两条白灯条强行配对
                     // ===================================================
                     bool white_ok = false;
-                    {
+                    // 白场兜底：属于极端场景（近战过曝纯白），默认关闭，_white_enable:=true 开启
+                    if (white_enable_) {
                         cv::Mat white_mask;
                         cv::inRange(hsv_full,
                                     cv::Scalar(0, 0, white_v_min_),
@@ -935,6 +937,7 @@ private:
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
     int white_v_min_, white_s_max_, white_area_min_;
     double white_aspect_min_, white_aspect_max_;
+    bool   white_enable_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
