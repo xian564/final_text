@@ -10,7 +10,7 @@ final_text/
 │   └── rune_detector.hpp       # 大招：高亮轮廓/最小二乘圆/PLL
 ├── src/
 │   ├── detection_node_v4.cpp   # 模块化节点（平A + 大招 + 模式切换）
-│   └── detection_node_v3.cpp   # 稳定单文件版本（默认）
+│   └── detection_node_v3.cpp   # 稳定单文件版本（默认，纯识别）
 ├── launch/  test_v2.launch  test_v3.launch  test_v4.launch
 ├── rviz/    armor_v2.rviz
 └── docs/    调试记录（attempts/）
@@ -25,14 +25,13 @@ final_text/
        ├─ NormalArmorDetector::detect → Target（3D + yaw）
        └─ EnergyRuneDetector::detect  → 预测 3D
    → /ft/armor_pose (PoseStamped)
-   → /ft/armor_velocity (TwistStamped)
    → /ft/debug/image_v4 (调试图)
 ```
 
 ## 视觉-火控交接边界
 
-视觉只输出：曝光时间戳、3D 位置、线速度、姿态四元数。
-**不计算**弹道下坠、飞行时间、电机延迟。
+视觉只输出：曝光时间戳、3D 位置、姿态四元数。
+**不做**弹道下坠、飞行时间、速度预测、目标预测与电机延迟补偿。
 
 ## 编译与运行
 
@@ -50,7 +49,7 @@ rostopic pub /vision_mode std_msgs/Int8 "data: 1"   # 1=大招
 |---|---|---|
 | 结构 | 单文件 ~1100 行 | 头文件拆分 + 节点 |
 | 预处理 | HSV + 高光 + 亮度 | CLAHE/Gamma + Canny 融合 |
-| 输出 | TF `armor_v3` | PoseStamped + TwistStamped |
+| 输出 | TF `armor_v3` | PoseStamped |
 | 平滑 | 5 帧加权 + z 中值 | Alpha-Beta |
 | 模式 | 固定平A | `/vision_mode` 切换 |
 | 状态 | 默认、验证充分 | 可选、功能块化 |

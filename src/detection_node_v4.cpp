@@ -1,7 +1,7 @@
 // ============================================================
 //  detection_node_v4.cpp
 //  ROS 节点：收图 / 预处理 / 模式调度 / 发布
-//  【视觉-火控交接边界】只输出 PoseStamped + TwistStamped
+//  【视觉交接边界】只输出识别位姿 PoseStamped（不含火控）
 // ============================================================
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
@@ -43,7 +43,6 @@ public:
         mode_sub_ = nh_.subscribe("/vision_mode", 1, &VisionNodeV4::modeCb, this);
         image_pub_ = it_.advertise("/ft/debug/image_v4", 1);
         pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("/ft/armor_pose", 1);
-        vel_pub_ = nh_.advertise<geometry_msgs::TwistStamped>("/ft/armor_velocity", 1);
     }
 
     bool ready() const { return ready_; }
@@ -95,12 +94,6 @@ private:
             ps.pose.orientation.z = q.z(); ps.pose.orientation.w = q.w();
             pose_pub_.publish(ps);
 
-            geometry_msgs::TwistStamped ts;
-            ts.header = ps.header;
-            ts.twist.linear.x = normal_.pub_v_[0];
-            ts.twist.linear.y = -normal_.pub_v_[1];
-            ts.twist.linear.z = normal_.pub_v_[2];
-            vel_pub_.publish(ts);
         }
 
         cv_bridge::CvImage out;
@@ -116,7 +109,7 @@ private:
     ros::Subscriber info_sub_, mode_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
-    ros::Publisher pose_pub_, vel_pub_;
+    ros::Publisher pose_pub_;
     Preprocessor pre_;
     NormalArmorDetector normal_;
     EnergyRuneDetector rune_;

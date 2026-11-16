@@ -44,7 +44,7 @@ public:
         : nh_(nh), pnh_(pnh), it_(nh),
           is_ready_(false), transport_ready_(true),
           tf_broadcaster_(), has_last_(false), lost_frames_(0),
-          has_sent_(false), blind_(false)
+          has_sent_(false)
     {
         // ---------- 动态参数（22 点之 13） ----------
         pnh_.param("aspect_min",  aspect_min_, 1.3);
@@ -59,7 +59,6 @@ public:
         pnh_.param("deadzone_px", deadzone_px_, 5.0);
         pnh_.param("uniqueness_dt", uniqueness_dt_, 0.15);
         pnh_.param("max_speed",   max_speed_, 8.0);     // 车体物理极限 m/s
-        pnh_.param("omega_blind", omega_blind_, 300.0); // 盲射阈值 deg/s
         pnh_.param("morph_size",  morph_size_, 3);
         pnh_.param("hsv_sv_min",   hsv_sv_min_, 100);
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
@@ -162,26 +161,6 @@ private:
             ROS_INFO("CameraInfo 已缓存: %ux%u (frame=%s)",
                      msg->width, msg->height, camera_frame_.c_str());
         is_ready_.store(true);
-    }
-
-    // ---------- 查表法下坠补偿（22 点之 21） ----------
-    double dropCompensation(double z, double* flight_t) {
-        static const double zs[]   = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
-        static const double ts[]   = {0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.21, 0.24};
-        static const double angs[] = {0.10, 0.35, 0.75, 1.30, 2.00, 2.85, 3.85, 5.00};
-        const int n = 8;
-        if (z <= zs[0]) { if (flight_t) *flight_t = ts[0]; return z * std::tan(angs[0] * CV_PI / 180.0); }
-        if (z >= zs[n - 1]) { if (flight_t) *flight_t = ts[n - 1]; return z * std::tan(angs[n - 1] * CV_PI / 180.0); }
-        for (int i = 0; i < n - 1; ++i) {
-            if (z >= zs[i] && z <= zs[i + 1]) {
-                double k = (z - zs[i]) / (zs[i + 1] - zs[i]);
-                double ang = angs[i] + k * (angs[i + 1] - angs[i]);
-                double t   = ts[i]   + k * (ts[i + 1] - ts[i]);
-                if (flight_t) *flight_t = t;
-                return z * std::tan(ang * CV_PI / 180.0);
-            }
-        }
-        return 0.0;
     }
 
     // ---------- 队列加权平滑 ----------
@@ -569,7 +548,7 @@ private:
                 }
 
                 // =======================================================
-                // 3. 时空校验 + 择优 + 车体中心 + 预测 + TF
+                // 3. 时空校验 + 择优 + 车体中心 + TF
                 // =======================================================
                 if (!targets.empty()) {
                     // ---- 众数滤波（过去 10 帧 7 票）----
@@ -653,9 +632,6 @@ private:
                                               mt.z, z_med_ref);
                         } else {
                         cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
-                        double flight_t = 0.0;
-                        double drop = dropCompensation(mt.z, &flight_t);
-                        t2[1] += drop;   // 叠加到最终发送的 Y 轴
 
                         cv::Vec3d avg_t;
                         double avg_yaw = 0.0;
@@ -676,36 +652,12 @@ private:
                             avg_t[2] = zs[zs.size() / 2];
                         }
 
-                        // ---- 旋转角速度 Omega（滑动窗口 0.6s）----
-                        yaw_hist_.push_back(std::make_pair(stamp, avg_yaw));
-                        while (!yaw_hist_.empty() && stamp - yaw_hist_.front().first > 0.6)
-                            yaw_hist_.pop_front();
-                        double omega = 0.0;
-                        if (yaw_hist_.size() >= 3) {
-                            double dt = yaw_hist_.back().first - yaw_hist_.front().first;
-                            if (dt > 1e-3) {
-                                double dyaw = avg_yaw - yaw_hist_.front().second;
-                                while (dyaw > CV_PI / 2) dyaw -= CV_PI;
-                                while (dyaw < -CV_PI / 2) dyaw += CV_PI;
-                                omega = dyaw / dt * 180.0 / CV_PI;
-                            }
-                        }
-                        omega_deg_s_ = omega;
-
-                        // ---- 高转速盲射 ----
-                        if (std::abs(omega) > omega_blind_) {
-                            blind_ = true;
-                            ROS_INFO_THROTTLE(1.0, "[Blind] Omega=%.0f deg/s 锁车体中心", omega);
-                        } else {
-                            blind_ = false;
-                        }
-
                         // ---- 坐标死区 ----
                         bool moved = true;
                         if (has_sent_)
                             moved = cv::norm(mt.center2d - last_sent_px_) > deadzone_px_;
 
-                        if (!blind_ && moved) {
+                        if (moved) {
                             geometry_msgs::TransformStamped ts;
                             ts.header.stamp = msg->header.stamp;
                             ts.header.frame_id = camera_frame_;
@@ -733,17 +685,6 @@ private:
                         last_yaw_ = avg_yaw;
                         has_last_ = true;
                         }
-                    }
-
-                    // ---- 预测下一块板（T = 90 / Omega）----
-                    double t_pred = -1.0;
-                    cv::Point2f pred_center = mt.center2d;
-                    if (std::abs(omega_deg_s_) > 30.0) {
-                        t_pred = 90.0 / std::abs(omega_deg_s_);
-                        if (t_pred < 3.0) {
-                            float sign = (omega_deg_s_ > 0) ? 1.0f : -1.0f;
-                            pred_center.x += sign * 120.0f;
-                        } else t_pred = -1.0;
                     }
 
                     // ---- 绘图 ----
@@ -775,24 +716,111 @@ private:
                              cv::Point((int)vc.x, (int)vc.y + 12),
                              cv::Scalar(255, 255, 0), 2);
 
-                    // 预测虚线框
-                    if (t_pred > 0) {
-                        int w = (int)(mt.corners[1].x - mt.corners[0].x);
-                        int h = (int)(mt.corners[3].y - mt.corners[0].y);
-                        cv::Rect pr((int)pred_center.x - w / 2,
-                                    (int)pred_center.y - h / 2, w, h);
-                        dashedRect(canvas, pr, cv::Scalar(255, 0, 255), 2);
-                        cv::putText(canvas, "PRED " + std::to_string((int)(t_pred * 1000)) + "ms",
-                                    cv::Point(pr.x, std::max(0, pr.y - 8)),
-                                    cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                                    cv::Scalar(255, 0, 255), 1);
+                    if (mt.has_pose) {
+                        // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
+                        bool z_outlier = false;
+                        double z_med_ref = mt.z;
+                        if (z_hist_.size() >= 3) {
+                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
+                            std::sort(zs.begin(), zs.end());
+                            z_med_ref = zs[zs.size() / 2];
+                            if (std::abs(mt.z - z_med_ref) > max_z_jump_)
+                                z_outlier = true;
+                        }
+                        if (z_outlier) {
+                            ROS_INFO_THROTTLE(1.0, "[Drop] z 离群 %.2f (中值 %.2f)",
+                                              mt.z, z_med_ref);
+                        } else {
+                        cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
+
+                        cv::Vec3d avg_t;
+                        double avg_yaw = 0.0;
+                        pushSmooth(t2, mt.yaw, avg_t, avg_yaw);
+
+                        // z 中值滤波（窗口 13），压测距抖动
+                        if (mt.id != last_z_id_ || mt.is_large != last_z_large_) {
+                            z_hist_.clear();
+                            last_z_id_ = mt.id;
+                            last_z_large_ = mt.is_large;
+                        }
+                        z_hist_.push_back(mt.z);
+                        while (static_cast<int>(z_hist_.size()) > z_median_win_)
+                            z_hist_.pop_front();
+                        {
+                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
+                            std::sort(zs.begin(), zs.end());
+                            avg_t[2] = zs[zs.size() / 2];
+                        }
+
+                        // ---- 坐标死区 ----
+                        bool moved = true;
+                        if (has_sent_)
+                            moved = cv::norm(mt.center2d - last_sent_px_) > deadzone_px_;
+
+                        if (moved) {
+                            geometry_msgs::TransformStamped ts;
+                            ts.header.stamp = msg->header.stamp;
+                            ts.header.frame_id = camera_frame_;
+                            ts.child_frame_id = "armor_v3";
+                            ts.transform.translation.x = avg_t[0];
+                            ts.transform.translation.y = avg_t[1];
+                            ts.transform.translation.z = avg_t[2];
+
+                            tf2::Quaternion q;
+                            q.setRPY(0.0, 0.0, avg_yaw);
+                            ts.transform.rotation.x = q.x();
+                            ts.transform.rotation.y = q.y();
+                            ts.transform.rotation.z = q.z();
+                            ts.transform.rotation.w = q.w();
+                            tf_broadcaster_.sendTransform(ts);
+
+                            last_sent_px_ = mt.center2d;
+                            has_sent_ = true;
+                        }
+
+                        last_stamp_ = stamp;
+                        last_center2d_ = mt.center2d;
+                        last_is_large_ = mt.is_large;
+                        last_pos_ = avg_t;
+                        last_yaw_ = avg_yaw;
+                        has_last_ = true;
+                        }
                     }
+
+                    // ---- 绘图 ----
+                    for (size_t k = 0; k < targets.size(); ++k) {
+                        const Target& tg = targets[k];
+                        int thick = (static_cast<int>(k) == best) ? 4 : 2;
+                        cv::rectangle(canvas,
+                                      cv::Rect((int)tg.corners[0].x, (int)tg.corners[0].y,
+                                               (int)(tg.corners[1].x - tg.corners[0].x),
+                                               (int)(tg.corners[3].y - tg.corners[0].y)),
+                                      cv::Scalar(0, 0, 255), thick);
+                        for (int c = 0; c < 4; ++c)
+                            cv::circle(canvas, tg.corners[c], 3, cv::Scalar(255, 0, 0), -1);
+
+                        std::string info = "ID:" + std::to_string(tg.id) +
+                                           (tg.is_large ? " L" : " S");
+                        cv::putText(canvas, info,
+                                    cv::Point((int)tg.corners[0].x,
+                                              std::max(0, (int)tg.corners[0].y - 10)),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                                    cv::Scalar(0, 0, 255), thick > 2 ? 2 : 1);
+                    }
+
+                    // 车体中心十字星
+                    cv::line(canvas, cv::Point((int)vc.x - 12, (int)vc.y),
+                             cv::Point((int)vc.x + 12, (int)vc.y),
+                             cv::Scalar(255, 255, 0), 2);
+                    cv::line(canvas, cv::Point((int)vc.x, (int)vc.y - 12),
+                             cv::Point((int)vc.x, (int)vc.y + 12),
+                             cv::Scalar(255, 255, 0), 2);
 
                     if (mt.has_pose) {
                         ROS_INFO_THROTTLE(1.0,
-                            "v3 id=%d %s ratio=%.2f z=%.2f yaw=%.1f omega=%.0f pred=%.2fs",
+                            "v3 id=%d %s ratio=%.2f z=%.2f yaw=%.1f",
                             mt.id, mt.is_large ? "L" : "S", mt.ratio, mt.z,
-                            mt.yaw * 180.0 / CV_PI, omega_deg_s_, t_pred);
+                            mt.yaw * 180.0 / CV_PI);
                     }
 
                     // ---- 记录上一帧成功状态，供 FCS 残影补位使用 ----
@@ -1035,7 +1063,7 @@ private:
     double aspect_min_, aspect_max_;
     double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
-    double max_z_, deadzone_px_, uniqueness_dt_, max_speed_, omega_blind_;
+    double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
     int hsv_sv_min_;
     double roi_y_ratio_;
@@ -1086,7 +1114,6 @@ private:
 
     bool has_sent_ = false;
     cv::Point2f last_sent_px_ = cv::Point2f(0, 0);
-    bool blind_ = false;
 
     std::atomic<bool> is_ready_;
     bool transport_ready_;
