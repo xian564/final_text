@@ -47,10 +47,10 @@ public:
           has_sent_(false), blind_(false)
     {
         // ---------- 动态参数（22 点之 13） ----------
-        pnh_.param("aspect_min",  aspect_min_, 1.5);
-        pnh_.param("aspect_max",  aspect_max_, 8.0);
+        pnh_.param("aspect_min",  aspect_min_, 2.0);
+        pnh_.param("aspect_max",  aspect_max_, 6.0);
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
-        pnh_.param("max_dist_x",  max_dist_x_, 250.0);
+        pnh_.param("max_dist_x",  max_dist_x_, 300.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
         pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
         pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
@@ -205,6 +205,22 @@ private:
                      cv::Point(r.x + r.width, std::min(y + step, r.y + r.height)), c, thick);
     }
 
+    // ---------- 亮度梯度（内部均值 - 边缘环均值） ----------
+    static double brightGradient(const cv::Mat& v, const cv::Rect& rect) {
+        cv::Rect r = rect & cv::Rect(0, 0, v.cols, v.rows);
+        if (r.width < 3 || r.height < 3) return 0.0;
+        cv::Mat m = cv::Mat::zeros(v.size(), CV_8UC1);
+        cv::rectangle(m, r, 255, cv::FILLED);
+        cv::Mat md;
+        cv::dilate(m, md, cv::getStructuringElement(cv::MORPH_RECT,
+                                                    cv::Size(11, 11)));
+        cv::Mat ring;
+        cv::subtract(md, m, ring);
+        double inner = cv::mean(v, m)[0];
+        double outer = cv::mean(v, ring)[0];
+        return inner - outer;
+    }
+
     // ---------- 图像回调 ----------
     void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
         if (!is_ready_.load()) return;
@@ -265,7 +281,7 @@ private:
                 cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
 
                 // 3) 过曝中心融合：颜色区域膨胀后与高亮 mask 相交，再并入分割 mask
-                if (assist_mode_ && !high_mask.empty()) {
+                if (!high_mask.empty()) {
                     cv::Mat color_mask, color_dil, high_fused;
                     cv::threshold(seg_mask, color_mask, 1, 255, cv::THRESH_BINARY);
                     cv::Mat k3 = cv::getStructuringElement(cv::MORPH_RECT,
@@ -498,14 +514,6 @@ private:
                     lost_this_frame = 0;
                     lost_frames_ = 0;
 
-                    assist_lost_ = 0;
-                    if (assist_mode_) {
-                        ROS_INFO_THROTTLE(1.0, "[Assist] 兜底帧命中目标");
-                        if (--assist_left_ <= 0) {
-                            assist_mode_ = false;
-                            ROS_INFO_THROTTLE(1.0, "[Assist] OFF");
-                        }
-                    }
 
                     // ---- 二维平行度择优（最正对）----
                     int best = 0;
@@ -647,25 +655,95 @@ private:
                             mt.id, mt.is_large ? "L" : "S", mt.ratio, mt.z,
                             mt.yaw * 180.0 / CV_PI, omega_deg_s_, t_pred);
                     }
+
+                    // ---- 记录上一帧成功状态，供 FCS 残影补位使用 ----
+                    {
+                        int bx1 = 1 << 30, by1 = 1 << 30, bx2 = -1, by2 = -1;
+                        for (int k = 0; k < 4; ++k) {
+                            bx1 = std::min(bx1, (int)mt.corners[k].x);
+                            by1 = std::min(by1, (int)mt.corners[k].y);
+                            bx2 = std::max(bx2, (int)mt.corners[k].x);
+                            by2 = std::max(by2, (int)mt.corners[k].y);
+                        }
+                        cv::Rect mr(bx1, by1, std::max(1, bx2 - bx1), std::max(1, by2 - by1));
+                        prev_had_target_ = true;
+                        prev_id_ = mt.id;
+                        prev_is_large_ = mt.is_large;
+                        prev_center2d_ = mt.center2d;
+                        prev_stamp_ = stamp;
+                        prev_aspect_ = (double)std::max(mr.width, mr.height) /
+                                       std::max(1, std::min(mr.width, mr.height));
+                        double bar_ratio = 1.0;
+                        for (size_t bi = 0; bi < bars.size(); ++bi) {
+                            cv::Point2f e1 = bars[bi].pts[1] - bars[bi].pts[0];
+                            cv::Point2f e2 = bars[bi].pts[2] - bars[bi].pts[1];
+                            double a = cv::norm(e1), b2 = cv::norm(e2);
+                            if (a > 1 && b2 > 1)
+                                bar_ratio = std::max(bar_ratio,
+                                                     std::max(a, b2) / std::min(a, b2));
+                        }
+                        prev_bar_ratio_ = bar_ratio;
+                        prev_grad_ = brightGradient(v_chan, mr);
+                    }
                 } else {
-                    ++lost_frames_;
-                    ++assist_lost_;
-                    if (!assist_mode_ && assist_lost_ >= 15) {
-                        assist_mode_ = true;
-                        assist_left_ = 15;
-                        assist_lost_ = 0;
-                        ROS_INFO_THROTTLE(1.0, "[Assist] ON 连续丢帧 15，启用高亮融合兜底");
+                    // ===================================================
+                    // 模块6：目标丢失重捕与残影补位（FCS）
+                    // ===================================================
+                    bool fcs_ok = false;
+                    double dt_fcs = stamp - prev_stamp_;
+                    if (prev_had_target_ && bars.size() <= 2 &&
+                        dt_fcs > 0.0 && dt_fcs < 1.0) {
+                        float best_dist = 1e9f;
+                        cv::Rect best_rect;
+                        int best_idx = -1;
+                        for (size_t ci = 0; ci < contours.size(); ++ci) {
+                            if (cv::contourArea(contours[ci]) < 150) continue;
+                            std::vector<cv::Point> poly;
+                            cv::approxPolyDP(contours[ci], poly,
+                                             0.02 * cv::arcLength(contours[ci], true), true);
+                            if (poly.size() != 4) continue;
+                            cv::Rect r = cv::boundingRect(poly);
+                            if (r.width < 8 || r.height < 5) continue;
+                            double asp = (double)std::max(r.width, r.height) /
+                                         std::max(1, std::min(r.width, r.height));
+                            bool ok_armor = (asp >= 0.5 * prev_aspect_ && asp <= 1.8 * prev_aspect_);
+                            bool ok_bar   = (asp >= 0.6 * prev_bar_ratio_ &&
+                                             asp <= 1.6 * prev_bar_ratio_);
+                            if (!ok_armor && !ok_bar) continue;
+                            cv::Point2f c(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
+                            float d = (float)cv::norm(c - prev_center2d_);
+                            if (d > 300.0f) continue;
+                            double grad = brightGradient(v_chan, r);
+                            if (std::abs(grad - prev_grad_) > 45.0) continue;
+                            if (d < best_dist) { best_dist = d; best_rect = r; best_idx = (int)ci; }
+                        }
+                        if (best_idx >= 0) {
+                            dashedRect(canvas, best_rect, cv::Scalar(0, 255, 255), 2);
+                            std::string fcs = "[FCS] LOCK ID:" + std::to_string(prev_id_) +
+                                              (prev_is_large_ ? " L" : " S");
+                            cv::putText(canvas, fcs,
+                                        cv::Point(best_rect.x, std::max(0, best_rect.y - 8)),
+                                        cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                                        cv::Scalar(0, 255, 255), 2);
+                            ROS_INFO_THROTTLE(0.5, "[FCS] 遮挡补位中 id=%d %s",
+                                              prev_id_, prev_is_large_ ? "L" : "S");
+                            prev_center2d_ = cv::Point2f(best_rect.x + best_rect.width * 0.5f,
+                                                         best_rect.y + best_rect.height * 0.5f);
+                            prev_stamp_ = stamp;
+                            fcs_ok = true;
+                            lost_frames_ = 0;
+                        }
                     }
-                    if (assist_mode_ && --assist_left_ <= 0) {
-                        assist_mode_ = false;
-                        ROS_INFO_THROTTLE(1.0, "[Assist] OFF");
-                    }
-                    ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
-                    if (lost_frames_ >= 5) {
-                        has_last_ = false; has_sent_ = false;
-                        pos_queue_.clear(); yaw_queue_.clear();
-                        size_hist_.clear(); yaw_hist_.clear();
-                        lost_frames_ = 0;
+
+                    if (!fcs_ok) {
+                        ++lost_frames_;
+                        ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
+                        if (lost_frames_ >= 5) {
+                            has_last_ = false; has_sent_ = false;
+                            pos_queue_.clear(); yaw_queue_.clear();
+                            size_hist_.clear(); yaw_hist_.clear();
+                            lost_frames_ = 0;
+                        }
                     }
                 }
             } else {
@@ -728,6 +806,16 @@ private:
     bool assist_mode_ = false;
     int  assist_left_ = 0;
     int  assist_lost_ = 0;
+
+    // FCS 残影补位状态
+    bool        prev_had_target_ = false;
+    int         prev_id_ = 0;
+    bool        prev_is_large_ = false;
+    cv::Point2f prev_center2d_ = cv::Point2f(0, 0);
+    double      prev_stamp_ = 0.0;
+    double      prev_aspect_ = 2.0;
+    double      prev_grad_ = 0.0;
+    double      prev_bar_ratio_ = 5.0;
 
     bool has_sent_ = false;
     cv::Point2f last_sent_px_ = cv::Point2f(0, 0);
