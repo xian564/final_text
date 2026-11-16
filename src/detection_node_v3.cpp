@@ -66,6 +66,7 @@ public:
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
         pnh_.param("z_median_win", z_median_win_, 13);
+        pnh_.param("max_z_jump",    max_z_jump_, 1.5);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
@@ -561,6 +562,20 @@ private:
                     // ---- 主目标平滑 + 下坠补偿 + TF ----
                     Target& mt = targets[best];
                     if (mt.has_pose) {
+                        // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
+                        bool z_outlier = false;
+                        double z_med_ref = mt.z;
+                        if (z_hist_.size() >= 3) {
+                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
+                            std::sort(zs.begin(), zs.end());
+                            z_med_ref = zs[zs.size() / 2];
+                            if (std::abs(mt.z - z_med_ref) > max_z_jump_)
+                                z_outlier = true;
+                        }
+                        if (z_outlier) {
+                            ROS_INFO_THROTTLE(1.0, "[Drop] z 离群 %.2f (中值 %.2f)",
+                                              mt.z, z_med_ref);
+                        } else {
                         cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
                         double flight_t = 0.0;
                         double drop = dropCompensation(mt.z, &flight_t);
@@ -571,7 +586,6 @@ private:
                         pushSmooth(t2, mt.yaw, avg_t, avg_yaw);
 
                         // z 中值滤波（窗口 13），压测距抖动
-                        // 目标 ID 或大小板变化时清空，避免不同目标混在一个窗口
                         if (mt.id != last_z_id_ || mt.is_large != last_z_large_) {
                             z_hist_.clear();
                             last_z_id_ = mt.id;
@@ -642,6 +656,7 @@ private:
                         last_pos_ = avg_t;
                         last_yaw_ = avg_yaw;
                         has_last_ = true;
+                        }
                     }
 
                     // ---- 预测下一块板（T = 90 / Omega）----
@@ -951,6 +966,7 @@ private:
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
     int z_median_win_;
+    double max_z_jump_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
