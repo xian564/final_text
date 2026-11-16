@@ -68,6 +68,8 @@ public:
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
+        pnh_.param("fcs_four_span", fcs_four_span_, 30.0);
+        pnh_.param("fcs_four_tol",  fcs_four_tol_, 60.0);
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -219,6 +221,25 @@ private:
         double inner = cv::mean(v, m)[0];
         double outer = cv::mean(v, ring)[0];
         return inner - outer;
+    }
+
+    // ---------- 四点亮度（2x2 四个光斑核心的峰值亮度） ----------
+    static void fourBrightness(const cv::Mat& v, const cv::Rect& rect, double out[4]) {
+        cv::Rect r = rect & cv::Rect(0, 0, v.cols, v.rows);
+        for (int i = 0; i < 4; ++i) out[i] = 0.0;
+        if (r.width < 4 || r.height < 4) return;
+        int w = r.width / 2, h = r.height / 2;
+        cv::Rect q[4] = {
+            cv::Rect(r.x,     r.y,     w,         h),
+            cv::Rect(r.x + w, r.y,     r.width - w, h),
+            cv::Rect(r.x,     r.y + h, w,         r.height - h),
+            cv::Rect(r.x + w, r.y + h, r.width - w, r.height - h)
+        };
+        for (int i = 0; i < 4; ++i) {
+            double mx = 0.0;
+            cv::minMaxLoc(v(q[i]), nullptr, &mx);
+            out[i] = mx;
+        }
     }
 
     // ---------- 图像回调 ----------
@@ -684,6 +705,7 @@ private:
                         }
                         prev_bar_ratio_ = bar_ratio;
                         prev_grad_ = brightGradient(v_chan, mr);
+                        fourBrightness(v_chan, mr, prev_four_);
                     }
                 } else {
                     // ===================================================
@@ -692,7 +714,7 @@ private:
                     bool fcs_ok = false;
                     double dt_fcs = stamp - prev_stamp_;
                     if (prev_had_target_ && bars.size() <= 2 &&
-                        dt_fcs > 0.0 && dt_fcs < 1.0) {
+                        dt_fcs > 0.0 && dt_fcs < 2.0) {
                         float best_dist = 1e9f;
                         cv::Rect best_rect;
                         int best_idx = -1;
@@ -712,9 +734,27 @@ private:
                             if (!ok_armor && !ok_bar) continue;
                             cv::Point2f c(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
                             float d = (float)cv::norm(c - prev_center2d_);
-                            if (d > 300.0f) continue;
+                            if (d > 400.0f) continue;
                             double grad = brightGradient(v_chan, r);
                             if (std::abs(grad - prev_grad_) > 45.0) continue;
+
+                            // 四点亮度一致性：四个光斑核心互相近似，且与上一帧渐变一致
+                            double c4[4];
+                            fourBrightness(v_chan, r, c4);
+                            double mn = c4[0], mx = c4[0];
+                            for (int q = 1; q < 4; ++q) {
+                                mn = std::min(mn, c4[q]);
+                                mx = std::max(mx, c4[q]);
+                            }
+                            if (mx - mn > fcs_four_span_) continue;
+                            bool four_ok = true;
+                            for (int q = 0; q < 4; ++q) {
+                                if (std::abs(c4[q] - prev_four_[q]) > fcs_four_tol_) {
+                                    four_ok = false; break;
+                                }
+                            }
+                            if (!four_ok) continue;
+
                             if (d < best_dist) { best_dist = d; best_rect = r; best_idx = (int)ci; }
                         }
                         if (best_idx >= 0) {
@@ -788,6 +828,7 @@ private:
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
+    double fcs_four_span_, fcs_four_tol_;
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
@@ -816,6 +857,7 @@ private:
     double      prev_aspect_ = 2.0;
     double      prev_grad_ = 0.0;
     double      prev_bar_ratio_ = 5.0;
+    double      prev_four_[4] = {0, 0, 0, 0};
 
     bool has_sent_ = false;
     cv::Point2f last_sent_px_ = cv::Point2f(0, 0);
