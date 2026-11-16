@@ -265,7 +265,7 @@ private:
                 cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
 
                 // 3) 过曝中心融合：颜色区域膨胀后与高亮 mask 相交，再并入分割 mask
-                if (!high_mask.empty()) {
+                if (assist_mode_ && !high_mask.empty()) {
                     cv::Mat color_mask, color_dil, high_fused;
                     cv::threshold(seg_mask, color_mask, 1, 255, cv::THRESH_BINARY);
                     cv::Mat k3 = cv::getStructuringElement(cv::MORPH_RECT,
@@ -498,6 +498,14 @@ private:
                     lost_this_frame = 0;
                     lost_frames_ = 0;
 
+                    if (assist_mode_) {
+                        ROS_INFO_THROTTLE(1.0, "[Assist] 兜底帧命中目标");
+                        if (--assist_left_ <= 0) {
+                            assist_mode_ = false;
+                            ROS_INFO_THROTTLE(1.0, "[Assist] OFF");
+                        }
+                    }
+
                     // ---- 二维平行度择优（最正对）----
                     int best = 0;
                     for (size_t k = 1; k < targets.size(); ++k)
@@ -640,6 +648,15 @@ private:
                     }
                 } else {
                     ++lost_frames_;
+                    if (!assist_mode_ && lost_frames_ >= 5) {
+                        assist_mode_ = true;
+                        assist_left_ = 15;
+                        ROS_INFO_THROTTLE(1.0, "[Assist] ON 连续丢帧 %d，启用高亮融合兜底", lost_frames_);
+                    }
+                    if (assist_mode_ && --assist_left_ <= 0) {
+                        assist_mode_ = false;
+                        ROS_INFO_THROTTLE(1.0, "[Assist] OFF");
+                    }
                     ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
                     if (lost_frames_ >= 5) {
                         has_last_ = false; has_sent_ = false;
@@ -650,6 +667,12 @@ private:
                 }
             } else {
                 ++lost_frames_;
+            }
+
+            // 兜底模式可视化标记
+            if (assist_mode_) {
+                cv::putText(canvas, "ASSIST", cv::Point(70, 32),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
             }
 
             cv_bridge::CvImage out_img;
@@ -699,6 +722,8 @@ private:
     double last_yaw_ = 0.0;
     double omega_deg_s_ = 0.0;
     int lost_frames_ = 0;
+    bool assist_mode_ = false;
+    int  assist_left_ = 0;
 
     bool has_sent_ = false;
     cv::Point2f last_sent_px_ = cv::Point2f(0, 0);
