@@ -65,6 +65,7 @@ public:
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
+        pnh_.param("z_median_win", z_median_win_, 13);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
@@ -569,6 +570,22 @@ private:
                         double avg_yaw = 0.0;
                         pushSmooth(t2, mt.yaw, avg_t, avg_yaw);
 
+                        // z 中值滤波（窗口 13），压测距抖动
+                        // 目标 ID 或大小板变化时清空，避免不同目标混在一个窗口
+                        if (mt.id != last_z_id_ || mt.is_large != last_z_large_) {
+                            z_hist_.clear();
+                            last_z_id_ = mt.id;
+                            last_z_large_ = mt.is_large;
+                        }
+                        z_hist_.push_back(mt.z);
+                        while (static_cast<int>(z_hist_.size()) > z_median_win_)
+                            z_hist_.pop_front();
+                        {
+                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
+                            std::sort(zs.begin(), zs.end());
+                            avg_t[2] = zs[zs.size() / 2];
+                        }
+
                         // ---- 旋转角速度 Omega（滑动窗口 0.6s）----
                         yaw_hist_.push_back(std::make_pair(stamp, avg_yaw));
                         while (!yaw_hist_.empty() && stamp - yaw_hist_.front().first > 0.6)
@@ -887,6 +904,7 @@ private:
                             has_last_ = false; has_sent_ = false;
                             pos_queue_.clear(); yaw_queue_.clear();
                             size_hist_.clear(); yaw_hist_.clear();
+                            z_hist_.clear();
                             lost_frames_ = 0;
                         }
                     }
@@ -932,6 +950,7 @@ private:
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
+    int z_median_win_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
@@ -941,6 +960,9 @@ private:
 
     // 状态
     std::deque<cv::Vec3d> pos_queue_;
+    std::deque<double> z_hist_;
+    int  last_z_id_ = -1;
+    bool last_z_large_ = false;
     std::deque<double> yaw_queue_;
     std::deque<bool> size_hist_;
     std::deque<std::pair<double, double> > yaw_hist_;

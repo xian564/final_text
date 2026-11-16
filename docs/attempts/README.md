@@ -47,3 +47,12 @@ LIBGL_ALWAYS_SOFTWARE=1 roslaunch final_text test.launch
 grep -c "^ok$" /tmp/roslaunch.log
 rostopic hz /ft/debug/image
 ```
+
+## 补充：z 中值滤波（2026-11-16）
+
+- 新增 `~z_median_win`（默认 13），对 PnP 的 z 做中值滤波；x/y 仍用 5 帧加权。
+- 目标 ID 或 S/L 变化时清空 z 历史，避免不同目标混窗。
+- 实测：
+  - blue_guard：z σ 0.72m → **0.52m**（改善 28%）
+  - red_4：z σ 1.15m → **1.09m**（几乎无改善）
+- 红包的 z 波动主要来自框在**不同目标/不同板之间跳变**（范围 1.54~5.49m），不是单目标噪声，中值滤波压不住；要处理需要加“同一目标连续性约束/离群 z 拒绝”。
