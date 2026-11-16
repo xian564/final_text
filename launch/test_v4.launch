@@ -1,0 +1,6 @@
+<launch>
+    <param name="use_sim_time" value="true" />
+    <node pkg="final_text" type="detect_node_v4" name="vision_node_v4" output="screen">
+        <param name="mode" value="0" />
+    </node>
+</launch>

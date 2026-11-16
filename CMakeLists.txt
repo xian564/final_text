@@ -249,3 +249,10 @@ target_link_libraries(detect_node_v3
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+
+# ---- v4：平A/大招双模块架构 ----
+add_executable(detect_node_v4 src/detection_node_v4.cpp)
+target_link_libraries(detect_node_v4
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
