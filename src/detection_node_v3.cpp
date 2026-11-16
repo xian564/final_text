@@ -448,7 +448,7 @@ private:
                         // 去重：中心距离 <25px 视为同一块板，避免同一根灯条被拆段后重复配对
                         bool dup = false;
                         for (size_t d = 0; d < targets.size(); ++d) {
-                            if (cv::norm(targets[d].center2d - tg.center2d) < 60.0) {
+                            if (cv::norm(targets[d].center2d - tg.center2d) < 120.0) {
                                 dup = true; break;
                             }
                         }
