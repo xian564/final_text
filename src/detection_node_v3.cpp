@@ -498,6 +498,7 @@ private:
                     lost_this_frame = 0;
                     lost_frames_ = 0;
 
+                    assist_lost_ = 0;
                     if (assist_mode_) {
                         ROS_INFO_THROTTLE(1.0, "[Assist] 兜底帧命中目标");
                         if (--assist_left_ <= 0) {
@@ -648,10 +649,12 @@ private:
                     }
                 } else {
                     ++lost_frames_;
-                    if (!assist_mode_ && lost_frames_ >= 5) {
+                    ++assist_lost_;
+                    if (!assist_mode_ && assist_lost_ >= 15) {
                         assist_mode_ = true;
                         assist_left_ = 15;
-                        ROS_INFO_THROTTLE(1.0, "[Assist] ON 连续丢帧 %d，启用高亮融合兜底", lost_frames_);
+                        assist_lost_ = 0;
+                        ROS_INFO_THROTTLE(1.0, "[Assist] ON 连续丢帧 15，启用高亮融合兜底");
                     }
                     if (assist_mode_ && --assist_left_ <= 0) {
                         assist_mode_ = false;
@@ -724,6 +727,7 @@ private:
     int lost_frames_ = 0;
     bool assist_mode_ = false;
     int  assist_left_ = 0;
+    int  assist_lost_ = 0;
 
     bool has_sent_ = false;
     cv::Point2f last_sent_px_ = cv::Point2f(0, 0);
