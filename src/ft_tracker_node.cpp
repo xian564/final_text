@@ -10,6 +10,8 @@
 #include <ft_msgs/Detection.h>
 #include <ft_msgs/Track.h>
 #include <opencv2/opencv.hpp>
+#include <cmath>
+#include <visualization_msgs/Marker.h>
 
 class TrackerNode {
 public:
@@ -45,6 +47,8 @@ public:
 
         sub_ = nh_.subscribe("/ft/detection", 10, &TrackerNode::detectionCallback, this);
         pub_ = nh_.advertise<ft_msgs::Track>("/ft/track", 10);
+        mk_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track_marker", 1);
+        param_timer_ = nh_.createTimer(ros::Duration(0.5), &TrackerNode::reloadParams, this);
     }
 
     // 主循环里每 10ms 调用一次：看门狗
@@ -101,6 +105,7 @@ private:
         cv::Mat meas = (cv::Mat_<float>(3, 1) <<
             msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
         kf_.correct(meas);
+        clampVelocity();
 
         frame_id_ = msg->header.frame_id;
         last_det_time_ = stamp;
@@ -116,9 +121,21 @@ private:
         if (dt <= 0.0 || dt > 0.5) dt = watchdog_period_;
         setDt(dt);
         kf_.predict();
+        clampVelocity();
         last_step_time_ = now;
         last_pred_time_ = now;
         publishTrack(now, false);
+    }
+
+    void clampVelocity() {
+        const float vmax = 6.0f;   // 车体物理上限 m/s
+        for (int i = 3; i < 6; ++i) {
+            float v = kf_.statePost.at<float>(i);
+            if (!std::isfinite(v)) v = 0.0f;
+            if (v > vmax) v = vmax;
+            if (v < -vmax) v = -vmax;
+            kf_.statePost.at<float>(i) = v;
+        }
     }
 
     void publishTrack(ros::Time stamp, bool tracking) {
@@ -132,15 +149,69 @@ private:
         out.tracking = tracking;
         out.position.x = x; out.position.y = y; out.position.z = z;
         out.velocity.x = vx; out.velocity.y = vy; out.velocity.z = vz;
-        out.position_predict.x = x + vx * predict_T_;
-        out.position_predict.y = y + vy * predict_T_;
-        out.position_predict.z = z + vz * predict_T_;
+        double dx = vx * predict_T_, dy = vy * predict_T_, dz = vz * predict_T_;
+        double dn = std::sqrt(dx*dx + dy*dy + dz*dz);
+        if (dn > 0.6) { dx *= 0.6/dn; dy *= 0.6/dn; dz *= 0.6/dn; }  // 预测偏移上限 0.6m
+        out.position_predict.x = x + dx;
+        out.position_predict.y = y + dy;
+        out.position_predict.z = z + dz;
         pub_.publish(out);
+
+        // RViz 预测 marker：绿球=预测点，黄线=实际点->预测点
+        visualization_msgs::Marker mk;
+        mk.header.stamp = stamp;
+        mk.header.frame_id = frame_id_;
+        mk.ns = "ft_track";
+        mk.id = 0;
+        mk.type = visualization_msgs::Marker::SPHERE;
+        mk.action = visualization_msgs::Marker::ADD;
+        mk.pose.position.x = out.position_predict.x;
+        mk.pose.position.y = out.position_predict.y;
+        mk.pose.position.z = out.position_predict.z;
+        mk.pose.orientation.w = 1.0;
+        mk.scale.x = mk.scale.y = mk.scale.z = 0.08;
+        mk.color.r = tracking ? 0.0f : 1.0f;
+        mk.color.g = tracking ? 1.0f : 0.0f;
+        mk.color.b = 0.0f;
+        mk.color.a = 1.0f;
+        mk.lifetime = ros::Duration(0.2);
+        mk_pub_.publish(mk);
+
+        visualization_msgs::Marker ln;
+        ln.header = mk.header;
+        ln.ns = "ft_track";
+        ln.id = 1;
+        ln.type = visualization_msgs::Marker::LINE_STRIP;
+        ln.action = visualization_msgs::Marker::ADD;
+        ln.scale.x = 0.012;
+        ln.color.r = 1.0f; ln.color.g = 0.8f; ln.color.b = 0.0f; ln.color.a = 1.0f;
+        ln.lifetime = ros::Duration(0.2);
+        geometry_msgs::Point p0, p1;
+        p0.x = out.position.x; p0.y = out.position.y; p0.z = out.position.z;
+        p1.x = out.position_predict.x; p1.y = out.position_predict.y; p1.z = out.position_predict.z;
+        ln.points.push_back(p0);
+        ln.points.push_back(p1);
+        mk_pub_.publish(ln);
+    }
+
+    void reloadParams(const ros::TimerEvent&) {
+        nh_.getParam("T", predict_T_);
+        nh_.getParam("q_pos", q_pos_);
+        nh_.getParam("q_vel", q_vel_);
+        nh_.getParam("r_pos", r_pos_);
+        nh_.getParam("lost_time_thresh", lost_time_thresh_);
+        nh_.getParam("watchdog_period", watchdog_period_);
+        for (int i = 0; i < 3; ++i) {
+            kf_.processNoiseCov.at<float>(i, i) = (float)q_pos_;
+            kf_.processNoiseCov.at<float>(i + 3, i + 3) = (float)q_vel_;
+            kf_.measurementNoiseCov.at<float>(i, i) = (float)r_pos_;
+        }
     }
 
     ros::NodeHandle nh_;
     ros::Subscriber sub_;
-    ros::Publisher pub_;
+    ros::Publisher pub_, mk_pub_;
+    ros::Timer param_timer_;
     cv::KalmanFilter kf_;
 
     bool is_tracking_ = false;

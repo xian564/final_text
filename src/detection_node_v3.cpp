@@ -109,8 +109,8 @@ public:
 
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise("/ft/debug/image", 1);
+        param_timer_ = pnh_.createTimer(ros::Duration(0.5), &VisionNodeV3::reloadParams, this);
         detection_pub_ = nh_.advertise<ft_msgs::Detection>("/ft/detection", 1);
-        track_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track_marker", 1);
     }
 
     bool isReady() const {
@@ -239,6 +239,32 @@ private:
             cv::minMaxLoc(v(q[i]), nullptr, &mx);
             out[i] = mx;
         }
+    }
+
+
+    // 每 0.5s 重新读取参数：rosparam set 后实时生效
+    void reloadParams(const ros::TimerEvent&) {
+        pnh_.getParam("bar_v_min", bar_v_min_);
+        pnh_.getParam("hsv_sv_min", hsv_sv_min_);
+        pnh_.getParam("blue_h_min", blue_h_min_);
+        pnh_.getParam("blue_h_max", blue_h_max_);
+        pnh_.getParam("blue_s_min", blue_s_min_);
+        pnh_.getParam("blue_v_min", blue_v_min_);
+        pnh_.getParam("yellow_h_min", yellow_h_min_);
+        pnh_.getParam("yellow_h_max", yellow_h_max_);
+        pnh_.getParam("yellow_s_min", yellow_s_min_);
+        pnh_.getParam("yellow_v_min", yellow_v_min_);
+        pnh_.getParam("aspect_min", aspect_min_);
+        pnh_.getParam("aspect_max", aspect_max_);
+        pnh_.getParam("min_dist_x", min_dist_x_);
+        pnh_.getParam("max_dist_x", max_dist_x_);
+        pnh_.getParam("ratio_min", ratio_min_);
+        pnh_.getParam("ratio_l_max", ratio_l_max_);
+        pnh_.getParam("pair_y_ratio", pair_y_ratio_);
+        pnh_.getParam("guard_y_ratio", guard_y_ratio_);
+        pnh_.getParam("near_area", near_area_);
+        pnh_.getParam("merge_bars", merge_bars_);
+        pnh_.getParam("white_enable", white_enable_);
     }
 
     // ---------- 图像回调 ----------
@@ -727,64 +753,6 @@ private:
                             det.pose.orientation.w = qd.w();
                             detection_pub_.publish(det);
 
-                            // 线速度：最近 6 帧最小二乘拟合，限制最大速度
-                            vel_hist_.push_back(std::make_pair(stamp, avg_t));
-                            while (vel_hist_.size() > 6) vel_hist_.pop_front();
-                            if (vel_hist_.size() >= 3) {
-                                double t0 = vel_hist_.front().first;
-                                double st = 0, stt = 0;
-                                cv::Vec3d sp(0, 0, 0), stp(0, 0, 0);
-                                for (size_t k = 0; k < vel_hist_.size(); ++k) {
-                                    double t = vel_hist_[k].first - t0;
-                                    const cv::Vec3d& p = vel_hist_[k].second;
-                                    st += t; stt += t * t; sp += p; stp += p * t;
-                                }
-                                double n = (double)vel_hist_.size();
-                                double den = n * stt - st * st;
-                                if (std::abs(den) > 1e-6)
-                                    vel_ = (sp * st - stp * n) / -den;   // slope of p(t)
-                                double spd = cv::norm(vel_);
-                                if (spd > 5.0) vel_ *= 5.0 / spd;
-                                if (spd < 0.05) vel_ = cv::Vec3d(0, 0, 0);
-                            }
-                            last_v_t_ = avg_t;
-                            last_v_stamp_ = stamp;
-                            has_vel_ = true;
-
-                            // 预测点：实际点往前 0.15s
-                            cv::Vec3d pred = avg_t + vel_ * 0.15;
-                            visualization_msgs::Marker mk;
-                            mk.header.stamp = msg->header.stamp;
-                            mk.header.frame_id = camera_frame_;
-                            mk.ns = "ft_track";
-                            mk.id = 0;
-                            mk.type = visualization_msgs::Marker::SPHERE;
-                            mk.action = visualization_msgs::Marker::ADD;
-                            mk.pose.position.x = pred[0];
-                            mk.pose.position.y = pred[1];
-                            mk.pose.position.z = pred[2];
-                            mk.pose.orientation.w = 1.0;
-                            mk.scale.x = mk.scale.y = mk.scale.z = 0.08;
-                            mk.color.r = 0.0f; mk.color.g = 1.0f; mk.color.b = 0.0f; mk.color.a = 1.0f;
-                            mk.lifetime = ros::Duration(0.2);
-                            track_pub_.publish(mk);
-
-                            // 实际点 -> 预测点 的连线（看清“往前一截”）
-                            visualization_msgs::Marker ln;
-                            ln.header = mk.header;
-                            ln.ns = "ft_track";
-                            ln.id = 1;
-                            ln.type = visualization_msgs::Marker::LINE_STRIP;
-                            ln.action = visualization_msgs::Marker::ADD;
-                            ln.scale.x = 0.012;
-                            ln.color.r = 1.0f; ln.color.g = 0.8f; ln.color.b = 0.0f; ln.color.a = 1.0f;
-                            ln.lifetime = ros::Duration(0.2);
-                            geometry_msgs::Point p0, p1;
-                            p0.x = avg_t[0]; p0.y = avg_t[1]; p0.z = avg_t[2];
-                            p1.x = pred[0];  p1.y = pred[1];  p1.z = pred[2];
-                            ln.points.push_back(p0);
-                            ln.points.push_back(p1);
-                            track_pub_.publish(ln);
                         }
 
                         last_stamp_ = stamp;
@@ -1166,11 +1134,8 @@ private:
     ros::Subscriber info_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
-    ros::Publisher detection_pub_, track_pub_;
-    cv::Vec3d last_v_t_ = cv::Vec3d(0, 0, 0), vel_ = cv::Vec3d(0, 0, 0);
-    double last_v_stamp_ = 0;
-    bool has_vel_ = false;
-    std::deque<std::pair<double, cv::Vec3d> > vel_hist_;
+    ros::Publisher detection_pub_;
+    ros::Timer param_timer_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
     // 动态参数（22 点之 13）
