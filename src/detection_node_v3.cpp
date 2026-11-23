@@ -16,6 +16,8 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <ft_msgs/Detection.h>
+#include <visualization_msgs/Marker.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <opencv2/opencv.hpp>
@@ -107,6 +109,8 @@ public:
 
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise("/ft/debug/image", 1);
+        detection_pub_ = nh_.advertise<ft_msgs::Detection>("/ft/detection", 1);
+        track_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track", 1);
     }
 
     bool isReady() const {
@@ -678,6 +682,111 @@ private:
                             has_sent_ = true;
                         }
 
+                        // ---- 发布检测结果与预测 marker ----
+                        {
+                            // 颜色判定
+                            int bx1 = canvas.cols, by1 = canvas.rows, bx2 = 0, by2 = 0;
+                            for (int k = 0; k < 4; ++k) {
+                                bx1 = std::min(bx1, (int)mt.corners[k].x);
+                                by1 = std::min(by1, (int)mt.corners[k].y);
+                                bx2 = std::max(bx2, (int)mt.corners[k].x);
+                                by2 = std::max(by2, (int)mt.corners[k].y);
+                            }
+                            cv::Rect bb = cv::Rect(bx1, by1, std::max(1, bx2 - bx1),
+                                                   std::max(1, by2 - by1)) &
+                                          cv::Rect(0, 0, canvas.cols, canvas.rows);
+                            int n_red = 0, n_blue = 0;
+                            if (bb.width > 2 && bb.height > 2) {
+                                cv::Mat hsv_bb = hsv_full(bb);
+                                cv::Mat m1, m2, mb;
+                                cv::inRange(hsv_bb, cv::Scalar(0, 60, 60),
+                                            cv::Scalar(10, 255, 255), m1);
+                                cv::inRange(hsv_bb, cv::Scalar(170, 60, 60),
+                                            cv::Scalar(179, 255, 255), m2);
+                                cv::inRange(hsv_bb, cv::Scalar(85, 40, 40),
+                                            cv::Scalar(140, 255, 255), mb);
+                                n_red = cv::countNonZero(m1 | m2);
+                                n_blue = cv::countNonZero(mb);
+                            }
+
+                            ft_msgs::Detection det;
+                            det.header.stamp = msg->header.stamp;
+                            det.header.frame_id = camera_frame_;
+                            det.id = mt.id;
+                            det.is_large_armor = mt.is_large;
+                            det.is_red = (n_red >= n_blue);
+                            // 与 TF 同一坐标系（平滑后 tvec）
+                            det.pose.position.x = avg_t[0];
+                            det.pose.position.y = avg_t[1];
+                            det.pose.position.z = avg_t[2];
+                            tf2::Quaternion qd;
+                            qd.setRPY(0.0, 0.0, avg_yaw);
+                            det.pose.orientation.x = qd.x();
+                            det.pose.orientation.y = qd.y();
+                            det.pose.orientation.z = qd.z();
+                            det.pose.orientation.w = qd.w();
+                            detection_pub_.publish(det);
+
+                            // 线速度：最近 6 帧最小二乘拟合，限制最大速度
+                            vel_hist_.push_back(std::make_pair(stamp, avg_t));
+                            while (vel_hist_.size() > 6) vel_hist_.pop_front();
+                            if (vel_hist_.size() >= 3) {
+                                double t0 = vel_hist_.front().first;
+                                double st = 0, stt = 0;
+                                cv::Vec3d sp(0, 0, 0), stp(0, 0, 0);
+                                for (size_t k = 0; k < vel_hist_.size(); ++k) {
+                                    double t = vel_hist_[k].first - t0;
+                                    const cv::Vec3d& p = vel_hist_[k].second;
+                                    st += t; stt += t * t; sp += p; stp += p * t;
+                                }
+                                double n = (double)vel_hist_.size();
+                                double den = n * stt - st * st;
+                                if (std::abs(den) > 1e-6)
+                                    vel_ = (sp * st - stp * n) / -den;   // slope of p(t)
+                                double spd = cv::norm(vel_);
+                                if (spd > 5.0) vel_ *= 5.0 / spd;
+                                if (spd < 0.05) vel_ = cv::Vec3d(0, 0, 0);
+                            }
+                            last_v_t_ = avg_t;
+                            last_v_stamp_ = stamp;
+                            has_vel_ = true;
+
+                            // 预测点：实际点往前 0.15s
+                            cv::Vec3d pred = avg_t + vel_ * 0.15;
+                            visualization_msgs::Marker mk;
+                            mk.header.stamp = msg->header.stamp;
+                            mk.header.frame_id = camera_frame_;
+                            mk.ns = "ft_track";
+                            mk.id = 0;
+                            mk.type = visualization_msgs::Marker::SPHERE;
+                            mk.action = visualization_msgs::Marker::ADD;
+                            mk.pose.position.x = pred[0];
+                            mk.pose.position.y = pred[1];
+                            mk.pose.position.z = pred[2];
+                            mk.pose.orientation.w = 1.0;
+                            mk.scale.x = mk.scale.y = mk.scale.z = 0.08;
+                            mk.color.r = 0.0f; mk.color.g = 1.0f; mk.color.b = 0.0f; mk.color.a = 1.0f;
+                            mk.lifetime = ros::Duration(0.2);
+                            track_pub_.publish(mk);
+
+                            // 实际点 -> 预测点 的连线（看清“往前一截”）
+                            visualization_msgs::Marker ln;
+                            ln.header = mk.header;
+                            ln.ns = "ft_track";
+                            ln.id = 1;
+                            ln.type = visualization_msgs::Marker::LINE_STRIP;
+                            ln.action = visualization_msgs::Marker::ADD;
+                            ln.scale.x = 0.012;
+                            ln.color.r = 1.0f; ln.color.g = 0.8f; ln.color.b = 0.0f; ln.color.a = 1.0f;
+                            ln.lifetime = ros::Duration(0.2);
+                            geometry_msgs::Point p0, p1;
+                            p0.x = avg_t[0]; p0.y = avg_t[1]; p0.z = avg_t[2];
+                            p1.x = pred[0];  p1.y = pred[1];  p1.z = pred[2];
+                            ln.points.push_back(p0);
+                            ln.points.push_back(p1);
+                            track_pub_.publish(ln);
+                        }
+
                         last_stamp_ = stamp;
                         last_center2d_ = mt.center2d;
                         last_is_large_ = mt.is_large;
@@ -1057,6 +1166,11 @@ private:
     ros::Subscriber info_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
+    ros::Publisher detection_pub_, track_pub_;
+    cv::Vec3d last_v_t_ = cv::Vec3d(0, 0, 0), vel_ = cv::Vec3d(0, 0, 0);
+    double last_v_stamp_ = 0;
+    bool has_vel_ = false;
+    std::deque<std::pair<double, cv::Vec3d> > vel_hist_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
     // 动态参数（22 点之 13）

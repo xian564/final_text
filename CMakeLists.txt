@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   tf2_ros
   geometry_msgs
+  ft_msgs
 )
 
 # ROS Noetic 自带 OpenCV 4.2；/usr/local 另有 4.5.5，混链会 ABI 冲突

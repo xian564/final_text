@@ -1,9 +1,15 @@
 <launch>
     <param name="use_sim_time" value="true" />
 
-    <node pkg="final_text" type="detect_node_v3" name="vision_node_v3" output="screen" />
+    <node pkg="final_text" type="detect_node_v3" name="vision_node_v3" output="screen">
+        <rosparam command="load" file="$(find final_text)/config/params.yaml" />
+    </node>
 
-    <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_image_view_v3" args="/ft/debug/image">
+    <!-- 仅用于 RViz 可视化：把相机光学系挂到固定系 -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="cam_visual_tf"
+          args="0 0 0 0 0 0 camera2_optical_frame hk_camera_ca" />
+
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find final_text)/rviz/armor_v3.rviz">
         <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
     </node>
 </launch>
