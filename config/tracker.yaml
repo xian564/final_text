@@ -5,3 +5,10 @@ r_pos: 0.05
 lost_time_thresh: 0.5
 watchdog_period: 0.05
 assoc_gate: 0.8
+
+detection_topic: /ft/detection
+track_topic: /ft/track
+marker_topic: /ft/debug/marker
+sub_queue: 10
+pub_queue: 10
+marker_queue: 1

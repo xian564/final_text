@@ -47,3 +47,16 @@ armor_large_w: 0.235
 armor_large_h: 0.127
 armor_small_w: 0.120
 armor_small_h: 0.125
+
+# 话题 / 队列 / 杂项阈值
+image_topic: /hk_camera/image_raw
+camera_info_topic: /hk_camera/camera_info
+debug_topic: /ft/debug/image
+detection_topic: /ft/detection
+sub_queue: 1
+pub_queue: 1
+tf_child_frame: armor_v3
+min_area: 20
+fcs_min_area: 150.0
+dedup_px: 120.0
+teleport_margin: 20.0

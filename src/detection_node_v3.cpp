@@ -99,13 +99,26 @@ public:
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
         pnh_.param("yellow_v_min", yellow_v_min_, 100);
 
+        // ---- 话题 / 队列 / 杂项阈值（全部外置）----
+        pnh_.param<std::string>("image_topic", image_topic_, "/hk_camera/image_raw");
+        pnh_.param<std::string>("camera_info_topic", info_topic_, "/hk_camera/camera_info");
+        pnh_.param<std::string>("debug_topic", debug_topic_, "/ft/debug/image");
+        pnh_.param<std::string>("detection_topic", detection_topic_, "/ft/detection");
+        pnh_.param("sub_queue", sub_queue_, 1);
+        pnh_.param("pub_queue", pub_queue_, 1);
+        pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
+        pnh_.param("min_area", min_area_, 20);
+        pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
+        pnh_.param("dedup_px", dedup_px_, 120.0);
+        pnh_.param("teleport_margin", teleport_margin_, 20.0);
+
         info_sub_ = nh_.subscribe(
-            "/hk_camera/camera_info", 1,
+            info_topic_, sub_queue_,
             &VisionNodeV3::cameraInfoCallback, this);
 
         try {
             image_sub_ = it_.subscribe(
-                "/hk_camera/image_raw", 1,
+                image_topic_, sub_queue_,
                 &VisionNodeV3::imageCallback, this,
                 image_transport::TransportHints(
                     "compressed", ros::TransportHints(), pnh_));
@@ -115,9 +128,9 @@ public:
         }
 
         // 与原版一致：发布 /ft/debug/image
-        image_pub_ = it_.advertise("/ft/debug/image", 1);
+        image_pub_ = it_.advertise(debug_topic_, pub_queue_);
         param_timer_ = pnh_.createTimer(ros::Duration(0.5), &VisionNodeV3::reloadParams, this);
-        detection_array_pub_ = nh_.advertise<ft_msgs::Detections>("/ft/detection", 1);
+        detection_array_pub_ = nh_.advertise<ft_msgs::Detections>(detection_topic_, pub_queue_);
     }
 
     bool isReady() const {
@@ -278,6 +291,10 @@ private:
         pnh_.getParam("near_area", near_area_);
         pnh_.getParam("merge_bars", merge_bars_);
         pnh_.getParam("white_enable", white_enable_);
+        pnh_.getParam("min_area", min_area_);
+        pnh_.getParam("fcs_min_area", fcs_min_area_);
+        pnh_.getParam("dedup_px", dedup_px_);
+        pnh_.getParam("teleport_margin", teleport_margin_);
     }
 
     // ---------- 图像回调 ----------
@@ -387,7 +404,7 @@ private:
                 }
 
                 for (size_t i = 0; i < contours.size(); ++i) {
-                    if (cv::contourArea(contours[i]) < 20) continue;
+                    if (cv::contourArea(contours[i]) < min_area_) continue;
                     cv::RotatedRect rr = cv::minAreaRect(contours[i]);
                     double w = rr.size.width, h = rr.size.height;
                     if (std::min(w, h) <= 0) continue;
@@ -548,7 +565,7 @@ private:
                         // 去重：中心距离 <25px 视为同一块板，避免同一根灯条被拆段后重复配对
                         bool dup = false;
                         for (size_t d = 0; d < targets.size(); ++d) {
-                            if (cv::norm(targets[d].center2d - tg.center2d) < 120.0) {
+                            if (cv::norm(targets[d].center2d - tg.center2d) < dedup_px_) {
                                 dup = true; break;
                             }
                         }
@@ -688,7 +705,7 @@ private:
                             double dt = stamp - last_stamp_;
                             double fx = K_.at<double>(0, 0);
                             double max_px = fx * max_speed_ * dt /
-                                            std::max(0.5, targets[k].z) * 1.5 + 20.0;
+                                            std::max(0.5, targets[k].z) * 1.5 + teleport_margin_;
                             double d = cv::norm(targets[k].center2d - last_center2d_);
                             if (d > max_px) {
                                 ROS_INFO_THROTTLE(1.0, "[Drop] 瞬移 %.1f px > %.1f", d, max_px);
@@ -763,7 +780,7 @@ private:
                             geometry_msgs::TransformStamped ts;
                             ts.header.stamp = msg->header.stamp;
                             ts.header.frame_id = camera_frame_;
-                            ts.child_frame_id = "armor_v3";
+                            ts.child_frame_id = tf_child_;
                             ts.transform.translation.x = avg_t[0];
                             ts.transform.translation.y = avg_t[1];
                             ts.transform.translation.z = avg_t[2];
@@ -864,7 +881,7 @@ private:
                             geometry_msgs::TransformStamped ts;
                             ts.header.stamp = msg->header.stamp;
                             ts.header.frame_id = camera_frame_;
-                            ts.child_frame_id = "armor_v3";
+                            ts.child_frame_id = tf_child_;
                             ts.transform.translation.x = avg_t[0];
                             ts.transform.translation.y = avg_t[1];
                             ts.transform.translation.z = avg_t[2];
@@ -1063,7 +1080,7 @@ private:
                         cv::Rect best_rect;
                         int best_idx = -1;
                         for (size_t ci = 0; ci < contours.size(); ++ci) {
-                            if (cv::contourArea(contours[ci]) < 150) continue;
+                            if (cv::contourArea(contours[ci]) < fcs_min_area_) continue;
                             std::vector<cv::Point> poly;
                             cv::approxPolyDP(contours[ci], poly,
                                              0.02 * cv::arcLength(contours[ci], true), true);
@@ -1169,6 +1186,9 @@ private:
     double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
     double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
+    std::string image_topic_, info_topic_, debug_topic_, detection_topic_, tf_child_;
+    int sub_queue_, pub_queue_, min_area_;
+    double fcs_min_area_, dedup_px_, teleport_margin_;
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
     int hsv_sv_min_;

@@ -24,6 +24,12 @@ public:
         nh_.param<double>("lost_time_thresh", lost_time_thresh_, 0.5);
         nh_.param<double>("watchdog_period", watchdog_period_, 0.05);   // 20fps
         nh_.param<double>("assoc_gate", assoc_gate_, 0.8);               // 关联门限 m
+        nh_.param<std::string>("detection_topic", detection_topic_, "/ft/detection");
+        nh_.param<std::string>("track_topic", track_topic_, "/ft/track");
+        nh_.param<std::string>("marker_topic", marker_topic_, "/ft/debug/marker");
+        nh_.param("sub_queue", sub_queue_, 10);
+        nh_.param("pub_queue", pub_queue_, 10);
+        nh_.param("marker_queue", marker_queue_, 1);
 
         kf_ = cv::KalmanFilter(6, 3, 0, CV_32F);
         kf_.transitionMatrix = (cv::Mat_<float>(6, 6) <<
@@ -47,9 +53,9 @@ public:
         cv::setIdentity(kf_.measurementNoiseCov, cv::Scalar::all(r_pos_));
         cv::setIdentity(kf_.errorCovPost, cv::Scalar::all(1.0));
 
-        sub_ = nh_.subscribe("/ft/detection", 10, &TrackerNode::detectionCallback, this);
-        pub_ = nh_.advertise<ft_msgs::Track>("/ft/track", 10);
-        mk_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track_marker", 1);
+        sub_ = nh_.subscribe(detection_topic_, sub_queue_, &TrackerNode::detectionCallback, this);
+        pub_ = nh_.advertise<ft_msgs::Track>(track_topic_, pub_queue_);
+        mk_pub_ = nh_.advertise<visualization_msgs::Marker>(marker_topic_, marker_queue_);
         param_timer_ = nh_.createTimer(ros::Duration(0.5), &TrackerNode::reloadParams, this);
     }
 
@@ -236,6 +242,8 @@ private:
 
     bool is_tracking_ = false;
     double assoc_gate_ = 0.8;
+    std::string detection_topic_, track_topic_, marker_topic_;
+    int sub_queue_ = 10, pub_queue_ = 10, marker_queue_ = 1;
     std::string frame_id_ = "hk_camera_ca";
     ros::Time last_det_time_, last_step_time_, last_pred_time_;
 
