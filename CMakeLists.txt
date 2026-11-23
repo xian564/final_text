@@ -120,6 +120,10 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 
+generate_dynamic_reconfigure_options(
+  cfg/Vision.cfg
+)
+
 catkin_package(
    INCLUDE_DIRS include
    # LIBRARIES final_text
@@ -248,6 +252,7 @@ target_link_libraries(detect_node_v2
 # ---- v3：22 点终极升级版（新建文件，不影响 v1/v2） ----
 add_executable(detect_node_v3 src/detection_node_v3.cpp)
 
+add_dependencies(detect_node_v3 ${PROJECT_NAME}_gencfg)
 target_link_libraries(detect_node_v3
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}

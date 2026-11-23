@@ -16,6 +16,8 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <dynamic_reconfigure/server.h>
+#include <final_text/VisionConfig.h>
 #include <ft_msgs/Detection.h>
 #include <ft_msgs/Detections.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -70,6 +72,8 @@ public:
         pnh_.param("max_speed",   max_speed_, 8.0);     // 车体物理极限 m/s
         pnh_.param("morph_size",  morph_size_, 3);
         pnh_.param("hsv_sv_min",   hsv_sv_min_, 100);
+        pnh_.param("red_h_min",    red_h_min_, 0);
+        pnh_.param("red_h_max",    red_h_max_, 10);
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
@@ -130,6 +134,10 @@ public:
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise(debug_topic_, pub_queue_);
         param_timer_ = pnh_.createTimer(ros::Duration(0.5), &VisionNodeV3::reloadParams, this);
+
+        dr_server_.reset(new dynamic_reconfigure::Server<final_text::VisionConfig>(pnh_));
+        dr_server_->setCallback(
+            boost::bind(&VisionNodeV3::drCallback, this, _1, _2));
         detection_array_pub_ = nh_.advertise<ft_msgs::Detections>(detection_topic_, pub_queue_);
     }
 
@@ -264,10 +272,44 @@ private:
     }
 
 
+    // dynamic_reconfigure 回调：先写回参数服务器，再立即生效
+    void drCallback(final_text::VisionConfig& cfg, uint32_t level) {
+        (void)level;
+        pnh_.setParam("red_h_min", cfg.red_h_min);
+        pnh_.setParam("red_h_max", cfg.red_h_max);
+        pnh_.setParam("hsv_sv_min", cfg.hsv_sv_min);
+        pnh_.setParam("blue_h_min", cfg.blue_h_min);
+        pnh_.setParam("blue_h_max", cfg.blue_h_max);
+        pnh_.setParam("blue_s_min", cfg.blue_s_min);
+        pnh_.setParam("blue_v_min", cfg.blue_v_min);
+        pnh_.setParam("bar_v_min", cfg.bar_v_min);
+        pnh_.setParam("min_area", cfg.min_area);
+        pnh_.setParam("max_dist_x", cfg.max_dist_x);
+        pnh_.setParam("max_angle_diff", cfg.max_angle_diff);
+        pnh_.setParam("aspect_min", cfg.aspect_min);
+        pnh_.setParam("aspect_max", cfg.aspect_max);
+        pnh_.setParam("ratio_min", cfg.ratio_min);
+        pnh_.setParam("ratio_l_max", cfg.ratio_l_max);
+        pnh_.setParam("pair_y_ratio", cfg.pair_y_ratio);
+        pnh_.setParam("white_enable", cfg.white_enable);
+
+        red_h_min_ = cfg.red_h_min; red_h_max_ = cfg.red_h_max;
+        hsv_sv_min_ = cfg.hsv_sv_min;
+        blue_h_min_ = cfg.blue_h_min; blue_h_max_ = cfg.blue_h_max;
+        blue_s_min_ = cfg.blue_s_min; blue_v_min_ = cfg.blue_v_min;
+        bar_v_min_ = cfg.bar_v_min; min_area_ = cfg.min_area;
+        max_dist_x_ = cfg.max_dist_x; max_angle_diff_ = cfg.max_angle_diff;
+        aspect_min_ = cfg.aspect_min; aspect_max_ = cfg.aspect_max;
+        ratio_min_ = cfg.ratio_min; ratio_l_max_ = cfg.ratio_l_max;
+        pair_y_ratio_ = cfg.pair_y_ratio; white_enable_ = cfg.white_enable;
+    }
+
     // 每 0.5s 重新读取参数：rosparam set 后实时生效
     void reloadParams(const ros::TimerEvent&) {
         pnh_.getParam("bar_v_min", bar_v_min_);
         pnh_.getParam("hsv_sv_min", hsv_sv_min_);
+        pnh_.getParam("red_h_min", red_h_min_);
+        pnh_.getParam("red_h_max", red_h_max_);
         pnh_.getParam("blue_h_min", blue_h_min_);
         pnh_.getParam("blue_h_max", blue_h_max_);
         pnh_.getParam("blue_s_min", blue_s_min_);
@@ -315,7 +357,7 @@ private:
 
             cv::Mat colored;
             colorSegment(canvas, colored,
-                         cv::Scalar(0, hsv_sv_min_, hsv_sv_min_), cv::Scalar(10, 255, 255),
+                         cv::Scalar(red_h_min_, hsv_sv_min_, hsv_sv_min_), cv::Scalar(red_h_max_, 255, 255),
                          cv::Scalar(blue_h_min_, blue_s_min_, blue_v_min_), cv::Scalar(blue_h_max_, 255, 255),
                          cv::Scalar(50, hsv_sv_min_, hsv_sv_min_), cv::Scalar(70, 255, 255),
                          morph_size_, hsv_sv_min_,
@@ -390,7 +432,7 @@ private:
                 if (max_c_area > near_area_) {
                     cv::Mat colored2;
                     colorSegment(canvas, colored2,
-                                 cv::Scalar(0, near_sv_, near_sv_), cv::Scalar(10, 255, 255),
+                                 cv::Scalar(red_h_min_, near_sv_, near_sv_), cv::Scalar(red_h_max_, 255, 255),
                                  cv::Scalar(blue_h_min_, near_sv_, near_sv_), cv::Scalar(blue_h_max_, 255, 255),
                                  cv::Scalar(50, near_sv_, near_sv_), cv::Scalar(70, 255, 255),
                                  morph_size_, near_sv_,
@@ -636,7 +678,7 @@ private:
                         if (bb.width > 2 && bb.height > 2) {
                             cv::Mat hsv_bb = hsv_full(bb);
                             cv::Mat m1, m2, mb;
-                            cv::inRange(hsv_bb, cv::Scalar(0, 60, 60), cv::Scalar(10, 255, 255), m1);
+                            cv::inRange(hsv_bb, cv::Scalar(red_h_min_, 60, 60), cv::Scalar(red_h_max_, 255, 255), m1);
                             cv::inRange(hsv_bb, cv::Scalar(170, 60, 60), cv::Scalar(179, 255, 255), m2);
                             cv::inRange(hsv_bb, cv::Scalar(85, 40, 40), cv::Scalar(140, 255, 255), mb);
                             n_red = cv::countNonZero(m1 | m2);
@@ -1164,7 +1206,6 @@ private:
             out_img.encoding = "bgr8";
             out_img.image = canvas;
             image_pub_.publish(out_img.toImageMsg());
-            std::cout << "ok" << std::endl;
 
         } catch (const cv_bridge::Exception& e) {
             ROS_ERROR("cv_bridge: %s", e.what());
@@ -1179,6 +1220,7 @@ private:
     image_transport::Publisher image_pub_;
     ros::Publisher detection_array_pub_;
     ros::Timer param_timer_;
+    boost::shared_ptr<dynamic_reconfigure::Server<final_text::VisionConfig> > dr_server_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
     // 动态参数（22 点之 13）
@@ -1192,6 +1234,7 @@ private:
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
     int hsv_sv_min_;
+    int red_h_min_, red_h_max_;
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;

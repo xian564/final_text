@@ -22,3 +22,15 @@
   话题名（detection/track/marker）、队列长度。
 - 两个 YAML 都由 `launch/test_v3.launch` 通过 `<rosparam command="load">` 加载；
   检测节点每 0.5s 重读一次，`rosparam set` 可实时生效。
+
+## 动态调参（dynamic_reconfigure）
+
+- 配置：`cfg/Vision.cfg`（红/蓝 H/S/V、最小面积、最大间距/角度差、亮度、长宽比、比例等）
+- 启动后可用：
+  ```bash
+  rosrun rqt_reconfigure rqt_reconfigure
+  # 或命令行
+  rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
+  ```
+- 服务名：`/vision_node_v3/set_parameters`
+- 回调会同步写回 `~` 参数，检测节点 0.5s 轮询也不会覆盖

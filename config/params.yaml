@@ -12,6 +12,8 @@ deadzone_px: 5.0
 uniqueness_dt: 0.15
 max_speed: 8.0
 morph_size: 3
+red_h_min: 0
+red_h_max: 10
 hsv_sv_min: 100
 roi_y_ratio: 0.0
 bar_v_min: 160
