@@ -44,7 +44,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/Marker
       Enabled: true
-      Marker Topic: /ft/track
+      Marker Topic: /ft/track_marker
       Name: Track
       Namespaces: {}
       Queue Size: 100

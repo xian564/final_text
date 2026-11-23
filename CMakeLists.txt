@@ -259,3 +259,11 @@ target_link_libraries(detect_node_v4
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+
+
+# ---- 跟踪节点：/ft/detection -> /ft/track ----
+add_executable(ft_tracker_node src/ft_tracker_node.cpp)
+target_link_libraries(ft_tracker_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)

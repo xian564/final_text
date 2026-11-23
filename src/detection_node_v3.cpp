@@ -110,7 +110,7 @@ public:
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise("/ft/debug/image", 1);
         detection_pub_ = nh_.advertise<ft_msgs::Detection>("/ft/detection", 1);
-        track_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track", 1);
+        track_pub_ = nh_.advertise<visualization_msgs::Marker>("/ft/track_marker", 1);
     }
 
     bool isReady() const {

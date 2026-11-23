@@ -5,6 +5,10 @@
         <rosparam command="load" file="$(find final_text)/config/params.yaml" />
     </node>
 
+    <node pkg="final_text" type="ft_tracker_node" name="ft_tracker" output="screen">
+        <rosparam command="load" file="$(find final_text)/config/tracker.yaml" />
+    </node>
+
     <!-- 仅用于 RViz 可视化：把相机光学系挂到固定系 -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="cam_visual_tf"
           args="0 0 0 0 0 0 camera2_optical_frame hk_camera_ca" />
