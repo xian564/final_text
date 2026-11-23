@@ -17,6 +17,8 @@
 #include <image_transport/image_transport.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <ft_msgs/Detection.h>
+#include <ft_msgs/Detections.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <visualization_msgs/Marker.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <geometry_msgs/TransformStamped.h>
@@ -111,6 +113,7 @@ public:
         image_pub_ = it_.advertise("/ft/debug/image", 1);
         param_timer_ = pnh_.createTimer(ros::Duration(0.5), &VisionNodeV3::reloadParams, this);
         detection_pub_ = nh_.advertise<ft_msgs::Detection>("/ft/detection", 1);
+        detection_array_pub_ = nh_.advertise<ft_msgs::Detections>("/ft/detections", 1);
     }
 
     bool isReady() const {
@@ -139,6 +142,8 @@ private:
         double yaw;
         double z;
         bool has_pose;
+        cv::Mat R;                 // rvec 转出的旋转矩阵（相机系）
+        bool has_r = false;
     };
 
     // ---------- 内参 ----------
@@ -565,6 +570,8 @@ private:
                                 tg.z = tg.t[2];
                                 cv::Mat R;
                                 cv::Rodrigues(rvec, R);
+                                tg.R = R.clone();
+                                tg.has_r = true;
                                 cv::Mat S = (cv::Mat_<double>(3, 3) <<
                                              1, 0, 0, 0, -1, 0, 0, 0, 1);
                                 cv::Mat R2 = S * R * S;
@@ -575,6 +582,63 @@ private:
 
                         targets.push_back(tg);
                     }
+                }
+
+                // ---- 发布当前帧全部检测（数组，每帧唯一 id）----
+                {
+                    ft_msgs::Detections arr;
+                    arr.header = msg->header;
+                    for (size_t k = 0; k < targets.size(); ++k) {
+                        const Target& tg = targets[k];
+                        if (!tg.has_pose || !tg.has_r) continue;
+
+                        ft_msgs::Detection d;
+                        d.header = msg->header;
+                        d.id = tg.id;
+                        d.is_large_armor = tg.is_large;
+
+                        // 颜色判定：取框内红/蓝像素数
+                        int bx1 = canvas.cols, by1 = canvas.rows, bx2 = 0, by2 = 0;
+                        for (int c = 0; c < 4; ++c) {
+                            bx1 = std::min(bx1, (int)tg.corners[c].x);
+                            by1 = std::min(by1, (int)tg.corners[c].y);
+                            bx2 = std::max(bx2, (int)tg.corners[c].x);
+                            by2 = std::max(by2, (int)tg.corners[c].y);
+                        }
+                        cv::Rect bb(bx1, by1, std::max(1, bx2 - bx1), std::max(1, by2 - by1));
+                        bb &= cv::Rect(0, 0, canvas.cols, canvas.rows);
+                        int n_red = 0, n_blue = 0;
+                        if (bb.width > 2 && bb.height > 2) {
+                            cv::Mat hsv_bb = hsv_full(bb);
+                            cv::Mat m1, m2, mb;
+                            cv::inRange(hsv_bb, cv::Scalar(0, 60, 60), cv::Scalar(10, 255, 255), m1);
+                            cv::inRange(hsv_bb, cv::Scalar(170, 60, 60), cv::Scalar(179, 255, 255), m2);
+                            cv::inRange(hsv_bb, cv::Scalar(85, 40, 40), cv::Scalar(140, 255, 255), mb);
+                            n_red = cv::countNonZero(m1 | m2);
+                            n_blue = cv::countNonZero(mb);
+                        }
+                        d.is_red = (n_red >= n_blue);
+
+                        // position = PnP tvec（相机系，未平滑）
+                        d.pose.position.x = tg.t[0];
+                        d.pose.position.y = tg.t[1];
+                        d.pose.position.z = tg.t[2];
+
+                        // orientation = rvec 转四元数
+                        tf2::Matrix3x3 m3(tg.R.at<double>(0,0), tg.R.at<double>(0,1), tg.R.at<double>(0,2),
+                                          tg.R.at<double>(1,0), tg.R.at<double>(1,1), tg.R.at<double>(1,2),
+                                          tg.R.at<double>(2,0), tg.R.at<double>(2,1), tg.R.at<double>(2,2));
+                        tf2::Quaternion qd;
+                        m3.getRotation(qd);
+                        d.pose.orientation.x = qd.x();
+                        d.pose.orientation.y = qd.y();
+                        d.pose.orientation.z = qd.z();
+                        d.pose.orientation.w = qd.w();
+
+                        arr.detections.push_back(d);
+                    }
+                    if (!arr.detections.empty())
+                        detection_array_pub_.publish(arr);
                 }
 
                 // =======================================================
@@ -1135,6 +1199,7 @@ private:
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
     ros::Publisher detection_pub_;
+    ros::Publisher detection_array_pub_;
     ros::Timer param_timer_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
