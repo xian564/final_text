@@ -568,22 +568,42 @@ private:
 
                         bool is_large = (ratio > ratio_s_max_);
 
-                        // ---------- 极值中点定厂字框 ----------
-                        const Bar& longer = (bars[i].long_h >= bars[j].long_h)
-                                            ? bars[i] : bars[j];
-                        int min_x = 1 << 30, max_x = -1;
-                        for (int s = 0; s < 2; ++s) {
-                            const std::vector<cv::Point>& c =
-                                (s == 0) ? bars[i].contour : bars[j].contour;
-                            for (size_t k = 0; k < c.size(); ++k) {
-                                min_x = std::min(min_x, c[k].x);
-                                max_x = std::max(max_x, c[k].x);
+                        // ---------- 旋转四点：左灯条左边缘 + 右灯条右边缘 ----------
+                        auto edge_top_bottom = [](const Bar& b, bool left_edge,
+                                                  cv::Point2f& top, cv::Point2f& bot) {
+                            float cx = b.rr.center.x;
+                            std::vector<cv::Point2f> e;
+                            for (int k = 0; k < 4; ++k) {
+                                if (left_edge ? (b.pts[k].x <= cx) : (b.pts[k].x >= cx))
+                                    e.push_back(b.pts[k]);
                             }
-                        }
-                        int min_y = 1 << 30, max_y = -1;
-                        for (size_t k = 0; k < 4; ++k) {
-                            min_y = std::min(min_y, (int)longer.pts[k].y);
-                            max_y = std::max(max_y, (int)longer.pts[k].y);
+                            if (e.size() < 2) { e.clear(); e.push_back(b.pts[0]); e.push_back(b.pts[2]); }
+                            top = e[0]; bot = e[0];
+                            for (size_t k = 1; k < e.size(); ++k) {
+                                if (e[k].y < top.y) top = e[k];
+                                if (e[k].y > bot.y) bot = e[k];
+                            }
+                        };
+                        cv::Point2f lt, lb, rt, rb;
+                        edge_top_bottom(bars[i], true, lt, lb);    // 左灯条外边缘
+                        edge_top_bottom(bars[j], false, rt, rb);   // 右灯条外边缘
+
+                        // 按板体长宽比拉伸高度：灯条外框高度≈灯长，不是板高
+                        {
+                            double W = is_large ? armor_large_w_ : armor_small_w_;
+                            double H = is_large ? armor_large_h_ : armor_small_h_;
+                            float wpx = (float)cv::norm(rt - lt);
+                            float cur_h = 0.5f * ((float)cv::norm(lb - lt) + (float)cv::norm(rb - rt));
+                            float target_h = wpx * (float)(H / std::max(1e-6, W));
+                            if (cur_h > 2.0f && target_h > 2.0f) {
+                                float cxx = (lt.x + rt.x + rb.x + lb.x) * 0.25f;
+                                float cyy = (lt.y + rt.y + rb.y + lb.y) * 0.25f;
+                                float sy = target_h / cur_h;
+                                lt.y = cyy + (lt.y - cyy) * sy;
+                                rt.y = cyy + (rt.y - cyy) * sy;
+                                rb.y = cyy + (rb.y - cyy) * sy;
+                                lb.y = cyy + (lb.y - cyy) * sy;
+                            }
                         }
 
                         Target tg;
@@ -591,12 +611,12 @@ private:
                         tg.is_large = is_large;
                         tg.ratio = ratio;
                         tg.avg_tilt = avg_angle;
-                        tg.corners.push_back(cv::Point2f(min_x, min_y));
-                        tg.corners.push_back(cv::Point2f(max_x, min_y));
-                        tg.corners.push_back(cv::Point2f(max_x, max_y));
-                        tg.corners.push_back(cv::Point2f(min_x, max_y));
-                        tg.center2d = cv::Point2f((min_x + max_x) * 0.5f,
-                                                  (min_y + max_y) * 0.5f);
+                        tg.corners.push_back(lt);   // TL
+                        tg.corners.push_back(rt);   // TR
+                        tg.corners.push_back(rb);   // BR
+                        tg.corners.push_back(lb);   // BL
+                        tg.center2d = cv::Point2f((lt.x + rt.x + rb.x + lb.x) * 0.25f,
+                                                  (lt.y + rt.y + rb.y + lb.y) * 0.25f);
 
                         // 4) 相对位置验证：配对中心必须在中上部
                         if (pair_y_ratio_ > 0.0 &&
@@ -618,10 +638,10 @@ private:
                             double half_w = (is_large ? armor_large_w_ : armor_small_w_) * 0.5;
                             double half_h = (is_large ? armor_large_h_ : armor_small_h_) * 0.5;
                             std::vector<cv::Point3f> obj;
-                            obj.push_back(cv::Point3f(-half_w,  half_h, 0));
-                            obj.push_back(cv::Point3f( half_w,  half_h, 0));
-                            obj.push_back(cv::Point3f( half_w, -half_h, 0));
-                            obj.push_back(cv::Point3f(-half_w, -half_h, 0));
+                            obj.push_back(cv::Point3f(-half_w, -half_h, 0));  // TL
+                            obj.push_back(cv::Point3f( half_w, -half_h, 0));  // TR
+                            obj.push_back(cv::Point3f( half_w,  half_h, 0));  // BR
+                            obj.push_back(cv::Point3f(-half_w,  half_h, 0));  // BL
 
                             cv::Mat rvec, tvec;
                             bool ok = cv::solvePnP(obj, tg.corners, K_, D_,
@@ -629,7 +649,8 @@ private:
                             if (!ok)
                                 ok = cv::solvePnP(obj, tg.corners, K_, D_,
                                                   rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
-                            if (ok) {
+                            if (ok && tvec.at<double>(2) > 0.3 &&
+                                tvec.at<double>(2) < 15.0) {
                                 tg.has_pose = true;
                                 tg.t = cv::Vec3d(tvec.at<double>(0),
                                                  tvec.at<double>(1),
