@@ -59,6 +59,11 @@ public:
         pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
         pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
         pnh_.param("ratio_min",   ratio_min_, 0.4);
+        // 装甲板本体尺寸（米），按考核文档：大 235×127mm，小 120×125mm
+        pnh_.param("armor_large_w", armor_large_w_, 0.235);
+        pnh_.param("armor_large_h", armor_large_h_, 0.127);
+        pnh_.param("armor_small_w", armor_small_w_, 0.120);
+        pnh_.param("armor_small_h", armor_small_h_, 0.125);
         pnh_.param("max_z",       max_z_, 8.0);
         pnh_.param("deadzone_px", deadzone_px_, 5.0);
         pnh_.param("uniqueness_dt", uniqueness_dt_, 0.15);
@@ -264,6 +269,10 @@ private:
         pnh_.getParam("max_dist_x", max_dist_x_);
         pnh_.getParam("ratio_min", ratio_min_);
         pnh_.getParam("ratio_l_max", ratio_l_max_);
+        pnh_.getParam("armor_large_w", armor_large_w_);
+        pnh_.getParam("armor_large_h", armor_large_h_);
+        pnh_.getParam("armor_small_w", armor_small_w_);
+        pnh_.getParam("armor_small_h", armor_small_h_);
         pnh_.getParam("pair_y_ratio", pair_y_ratio_);
         pnh_.getParam("guard_y_ratio", guard_y_ratio_);
         pnh_.getParam("near_area", near_area_);
@@ -547,8 +556,8 @@ private:
 
                         // ---------- solvePnP ----------
                         if (K_.rows == 3 && K_.cols == 3) {
-                            double half_w = is_large ? 0.1125 : 0.0675;
-                            double half_h = 0.0275;
+                            double half_w = (is_large ? armor_large_w_ : armor_small_w_) * 0.5;
+                            double half_h = (is_large ? armor_large_h_ : armor_small_h_) * 0.5;
                             std::vector<cv::Point3f> obj;
                             obj.push_back(cv::Point3f(-half_w,  half_h, 0));
                             obj.push_back(cv::Point3f( half_w,  half_h, 0));
@@ -1159,6 +1168,7 @@ private:
     double aspect_min_, aspect_max_;
     double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
+    double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
     int hsv_sv_min_;

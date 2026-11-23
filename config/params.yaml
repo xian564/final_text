@@ -41,3 +41,9 @@ yellow_h_min: 10
 yellow_h_max: 35
 yellow_s_min: 100
 yellow_v_min: 100
+
+# 装甲板本体尺寸（米），来源：考核文档 235x127 / 120x125 mm
+armor_large_w: 0.235
+armor_large_h: 0.127
+armor_small_w: 0.120
+armor_small_h: 0.125
