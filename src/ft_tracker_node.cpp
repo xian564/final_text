@@ -8,6 +8,7 @@
 // ============================================================
 #include <ros/ros.h>
 #include <ft_msgs/Detection.h>
+#include <ft_msgs/Detections.h>
 #include <ft_msgs/Track.h>
 #include <opencv2/opencv.hpp>
 #include <cmath>
@@ -22,6 +23,7 @@ public:
         nh_.param<double>("r_pos", r_pos_, 0.05);
         nh_.param<double>("lost_time_thresh", lost_time_thresh_, 0.5);
         nh_.param<double>("watchdog_period", watchdog_period_, 0.05);   // 20fps
+        nh_.param<double>("assoc_gate", assoc_gate_, 0.8);               // 关联门限 m
 
         kf_ = cv::KalmanFilter(6, 3, 0, CV_32F);
         kf_.transitionMatrix = (cv::Mat_<float>(6, 6) <<
@@ -80,12 +82,30 @@ private:
         kf_.transitionMatrix.at<float>(2, 5) = (float)dt;
     }
 
-    void detectionCallback(const ft_msgs::Detection::ConstPtr& msg) {
+    void detectionCallback(const ft_msgs::Detections::ConstPtr& msg) {
+        if (msg->detections.empty()) return;
         ros::Time stamp = msg->header.stamp;
 
-        if (!is_tracking_) {              // 初始化
+        // ---- 多检测关联：已有轨迹时选离预测最近且在门限内的 ----
+        int pick = 0;
+        if (is_tracking_) {
+            float px = kf_.statePost.at<float>(0);
+            float py = kf_.statePost.at<float>(1);
+            float pz = kf_.statePost.at<float>(2);
+            double best = assoc_gate_;
+            pick = -1;
+            for (size_t i = 0; i < msg->detections.size(); ++i) {
+                const auto& p = msg->detections[i].pose.position;
+                double d = std::sqrt((p.x-px)*(p.x-px) + (p.y-py)*(p.y-py) + (p.z-pz)*(p.z-pz));
+                if (d < best) { best = d; pick = (int)i; }
+            }
+            if (pick < 0) return;      // 门限内没有观测，交给看门狗纯预测
+        }
+        const ft_msgs::Detection& det = msg->detections[pick];
+
+        if (!is_tracking_) {           // 初始化
             kf_.statePost = (cv::Mat_<float>(6, 1) <<
-                msg->pose.position.x, msg->pose.position.y, msg->pose.position.z,
+                det.pose.position.x, det.pose.position.y, det.pose.position.z,
                 0, 0, 0);
             frame_id_ = msg->header.frame_id;
             last_det_time_ = stamp;
@@ -96,14 +116,14 @@ private:
         }
 
         double dt = (stamp - last_det_time_).toSec();
-        if (dt <= 0.0 || dt > 0.5) {      // dt 异常，重新捕获
+        if (dt <= 0.0 || dt > 0.5) {   // dt 异常，重新捕获
             is_tracking_ = false;
             return;
         }
         setDt(dt);
         kf_.predict();
         cv::Mat meas = (cv::Mat_<float>(3, 1) <<
-            msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+            det.pose.position.x, det.pose.position.y, det.pose.position.z);
         kf_.correct(meas);
         clampVelocity();
 
@@ -111,7 +131,6 @@ private:
         last_det_time_ = stamp;
         last_step_time_ = stamp;
         last_pred_time_ = stamp;
-
         publishTrack(stamp, true);
     }
 
@@ -201,6 +220,7 @@ private:
         nh_.getParam("r_pos", r_pos_);
         nh_.getParam("lost_time_thresh", lost_time_thresh_);
         nh_.getParam("watchdog_period", watchdog_period_);
+        nh_.getParam("assoc_gate", assoc_gate_);
         for (int i = 0; i < 3; ++i) {
             kf_.processNoiseCov.at<float>(i, i) = (float)q_pos_;
             kf_.processNoiseCov.at<float>(i + 3, i + 3) = (float)q_vel_;
@@ -215,6 +235,7 @@ private:
     cv::KalmanFilter kf_;
 
     bool is_tracking_ = false;
+    double assoc_gate_ = 0.8;
     std::string frame_id_ = "hk_camera_ca";
     ros::Time last_det_time_, last_step_time_, last_pred_time_;
 

@@ -4,3 +4,4 @@ q_vel: 0.5
 r_pos: 0.05
 lost_time_thresh: 0.5
 watchdog_period: 0.05
+assoc_gate: 0.8

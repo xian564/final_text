@@ -112,8 +112,7 @@ public:
         // 与原版一致：发布 /ft/debug/image
         image_pub_ = it_.advertise("/ft/debug/image", 1);
         param_timer_ = pnh_.createTimer(ros::Duration(0.5), &VisionNodeV3::reloadParams, this);
-        detection_pub_ = nh_.advertise<ft_msgs::Detection>("/ft/detection", 1);
-        detection_array_pub_ = nh_.advertise<ft_msgs::Detections>("/ft/detections", 1);
+        detection_array_pub_ = nh_.advertise<ft_msgs::Detections>("/ft/detection", 1);
     }
 
     bool isReady() const {
@@ -772,52 +771,6 @@ private:
                             has_sent_ = true;
                         }
 
-                        // ---- 发布检测结果与预测 marker ----
-                        {
-                            // 颜色判定
-                            int bx1 = canvas.cols, by1 = canvas.rows, bx2 = 0, by2 = 0;
-                            for (int k = 0; k < 4; ++k) {
-                                bx1 = std::min(bx1, (int)mt.corners[k].x);
-                                by1 = std::min(by1, (int)mt.corners[k].y);
-                                bx2 = std::max(bx2, (int)mt.corners[k].x);
-                                by2 = std::max(by2, (int)mt.corners[k].y);
-                            }
-                            cv::Rect bb = cv::Rect(bx1, by1, std::max(1, bx2 - bx1),
-                                                   std::max(1, by2 - by1)) &
-                                          cv::Rect(0, 0, canvas.cols, canvas.rows);
-                            int n_red = 0, n_blue = 0;
-                            if (bb.width > 2 && bb.height > 2) {
-                                cv::Mat hsv_bb = hsv_full(bb);
-                                cv::Mat m1, m2, mb;
-                                cv::inRange(hsv_bb, cv::Scalar(0, 60, 60),
-                                            cv::Scalar(10, 255, 255), m1);
-                                cv::inRange(hsv_bb, cv::Scalar(170, 60, 60),
-                                            cv::Scalar(179, 255, 255), m2);
-                                cv::inRange(hsv_bb, cv::Scalar(85, 40, 40),
-                                            cv::Scalar(140, 255, 255), mb);
-                                n_red = cv::countNonZero(m1 | m2);
-                                n_blue = cv::countNonZero(mb);
-                            }
-
-                            ft_msgs::Detection det;
-                            det.header.stamp = msg->header.stamp;
-                            det.header.frame_id = camera_frame_;
-                            det.id = mt.id;
-                            det.is_large_armor = mt.is_large;
-                            det.is_red = (n_red >= n_blue);
-                            // 与 TF 同一坐标系（平滑后 tvec）
-                            det.pose.position.x = avg_t[0];
-                            det.pose.position.y = avg_t[1];
-                            det.pose.position.z = avg_t[2];
-                            tf2::Quaternion qd;
-                            qd.setRPY(0.0, 0.0, avg_yaw);
-                            det.pose.orientation.x = qd.x();
-                            det.pose.orientation.y = qd.y();
-                            det.pose.orientation.z = qd.z();
-                            det.pose.orientation.w = qd.w();
-                            detection_pub_.publish(det);
-
-                        }
 
                         last_stamp_ = stamp;
                         last_center2d_ = mt.center2d;
@@ -1198,7 +1151,6 @@ private:
     ros::Subscriber info_sub_;
     image_transport::Subscriber image_sub_;
     image_transport::Publisher image_pub_;
-    ros::Publisher detection_pub_;
     ros::Publisher detection_array_pub_;
     ros::Timer param_timer_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
