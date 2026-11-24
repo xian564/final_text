@@ -913,11 +913,23 @@ private:
                     lost_frames_ = 0;
 
 
-                    // ---- 二维平行度择优（最正对）----
+                    // ---- 目标选择：相邻帧优先锁同一块装甲板 ----
                     int best = 0;
-                    for (size_t k = 1; k < targets.size(); ++k)
-                        if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
-                            best = static_cast<int>(k);
+                    bool locked = false;
+                    if (prev_had_target_) {
+                        double bestd = 1e18;
+                        int cand = -1;
+                        for (size_t k = 0; k < targets.size(); ++k) {
+                            double d = cv::norm(targets[k].center2d - prev_center2d_);
+                            if (d < bestd) { bestd = d; cand = (int)k; }
+                        }
+                        if (cand >= 0 && bestd < 300.0) { best = cand; locked = true; }
+                    }
+                    if (!locked) {
+                        for (size_t k = 1; k < targets.size(); ++k)
+                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
+                                best = static_cast<int>(k);
+                    }
 
                     // ---- 整车中心聚合 ----
                     cv::Point2f vc(0, 0);

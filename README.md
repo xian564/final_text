@@ -108,3 +108,23 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 平均误差 0.062m。
 
 > 阈值越严误判越低，但远距离/半遮挡会更多漏检。若现场发现漏检，优先把 `bar_h_ratio_min` 调到 0.45、`pair_dy_ratio` 调到 0.6；要更严就反过来。
+
+## 神经网络识别模式（NN）
+
+- 模型：`nn_model.zip/armor.onnx`（输入 1×3×480×640、输出 [1,21,6300]）。
+- 模型是 FP16 + opset22，OpenCV DNN 无法加载（`Unsupported FLOAT16` / Conv 3 输入），
+  需要先转换：
+  ```bash
+  python3 scripts/convert_onnx_fp32.py armor.onnx armor_allfp32.onnx
+  ```
+  转换内容：FP16 张量/ Cast 目标 → FP32，opset → 19，IR → 9。
+- 推理后端：ONNX Runtime。当前环境没有 ORT C++ 开发包（头文件/libonnxruntime.so），
+  因此 `scripts/nn_detector_node.py` 用 ORT Python 后端跑，接口层仍保留
+  `include/final_text/detector_interface.hpp` 的 `IDetector / OnnxDetector`。
+- 启动：
+  ```bash
+  roslaunch final_text test_nn.launch model_path:=/path/armor_allfp32.onnx
+  ```
+  输出 `/ft/detection_nn`（`ft_msgs/Detections`）和 `/ft/debug/image_nn`，
+  跟踪节点通过 remap 订阅 NN 结果。
+- 相邻帧锁定：多目标时选与上一帧中心最近的一块（`lock_gate_px`），避免左右板来回跳。

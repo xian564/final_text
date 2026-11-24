@@ -280,3 +280,15 @@ target_link_libraries(detect_node_v3_1
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+
+
+# ---- 神经网络检测节点 ----
+add_executable(detect_node_nn src/detect_node_nn.cpp)
+target_link_libraries(detect_node_nn
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
+
+
+catkin_install_python(PROGRAMS scripts/nn_detector_node.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
