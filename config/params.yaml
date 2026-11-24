@@ -62,3 +62,6 @@ min_area: 20
 fcs_min_area: 150.0
 dedup_px: 120.0
 teleport_margin: 20.0
+
+plane_filter: true
+plane_dist_ratio: 1.0

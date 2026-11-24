@@ -115,6 +115,8 @@ public:
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
         pnh_.param("dedup_px", dedup_px_, 120.0);
         pnh_.param("teleport_margin", teleport_margin_, 20.0);
+        pnh_.param("plane_filter", plane_filter_, true);      // 共面过滤（排除反光）
+        pnh_.param("plane_dist_ratio", plane_dist_ratio_, 1.0); // 阈值 = 灯条长度 * ratio
 
         info_sub_ = nh_.subscribe(
             info_topic_, sub_queue_,
@@ -337,6 +339,8 @@ private:
         pnh_.getParam("fcs_min_area", fcs_min_area_);
         pnh_.getParam("dedup_px", dedup_px_);
         pnh_.getParam("teleport_margin", teleport_margin_);
+        pnh_.getParam("plane_filter", plane_filter_);
+        pnh_.getParam("plane_dist_ratio", plane_dist_ratio_);
     }
 
     // ---------- 图像回调 ----------
@@ -547,6 +551,44 @@ private:
                               return a.center.x < b.center.x;
                           });
 
+                // ---- 灯条级共面过滤：最亮两根定平面，离面超过灯条长度的当反光 ----
+                if (plane_filter_ && bars.size() >= 3) {
+                    int a = 0;
+                    for (size_t k = 1; k < bars.size(); ++k)
+                        if (bars[k].v > bars[a].v) a = (int)k;
+                    int b = -1;
+                    double bestv = -1.0;
+                    for (size_t k = 0; k < bars.size(); ++k) {
+                        if ((int)k == a) continue;
+                        double dx = std::abs(bars[k].center.x - bars[a].center.x);
+                        if (dx < min_dist_x_ || dx > max_dist_x_) continue;
+                        if (std::abs(bars[k].center.y - bars[a].center.y) >
+                            1.2 * std::max(bars[a].long_h, bars[k].long_h)) continue;
+                        if (bars[k].v > bestv) { bestv = bars[k].v; b = (int)k; }
+                    }
+                    if (b >= 0) {
+                        cv::Point2f A = bars[a].center, B = bars[b].center;
+                        cv::Point2f dir = B - A;
+                        double dl = cv::norm(dir);
+                        if (dl > 1.0) {
+                            cv::Point2f n(-dir.y / dl, dir.x / dl);
+                            double thr = std::max(bars[a].long_h, bars[b].long_h) *
+                                         plane_dist_ratio_;
+                            std::vector<Bar> kept;
+                            for (size_t k = 0; k < bars.size(); ++k) {
+                                double d = std::abs((bars[k].center.x - A.x) * n.x +
+                                                    (bars[k].center.y - A.y) * n.y);
+                                if (d <= thr) kept.push_back(bars[k]);
+                            }
+                            if (kept.size() >= 2 && kept.size() < bars.size()) {
+                                ROS_INFO_THROTTLE(1.0, "[Plane] 灯条反光剔除 %d 根",
+                                                  (int)(bars.size() - kept.size()));
+                                bars.swap(kept);
+                            }
+                        }
+                    }
+                }
+
                 // =======================================================
                 // 2. 配对 + 几何修正 + 幽灵剔除
                 // =======================================================
@@ -674,6 +716,39 @@ private:
                         }
 
                         targets.push_back(tg);
+                    }
+                }
+
+                // ---- 共面过滤：离主装甲板平面 > 灯条长度的候选判为反光 ----
+                if (plane_filter_ && targets.size() >= 2) {
+                    // 主目标：横向宽度最大
+                    int p = 0;
+                    double pw = 0;
+                    for (size_t k = 0; k < targets.size(); ++k) {
+                        double w = cv::norm(targets[k].corners[1] - targets[k].corners[0]);
+                        if (w > pw) { pw = w; p = (int)k; }
+                    }
+                    const Target& pt = targets[p];
+                    cv::Point2f A = (pt.corners[0] + pt.corners[3]) * 0.5f;  // 左灯条中点
+                    cv::Point2f B = (pt.corners[1] + pt.corners[2]) * 0.5f;  // 右灯条中点
+                    cv::Point2f dir = B - A;
+                    double dl = cv::norm(dir);
+                    if (dl > 1.0) {
+                        cv::Point2f n(-dir.y / dl, dir.x / dl);
+                        double lamp_len = 0.5 * (cv::norm(pt.corners[0] - pt.corners[3]) +
+                                                 cv::norm(pt.corners[1] - pt.corners[2]));
+                        double thr = lamp_len * plane_dist_ratio_;
+                        std::vector<Target> kept;
+                        for (size_t k = 0; k < targets.size(); ++k) {
+                            if ((int)k == p) { kept.push_back(targets[k]); continue; }
+                            double d = std::abs((targets[k].center2d.x - A.x) * n.x +
+                                                (targets[k].center2d.y - A.y) * n.y);
+                            if (d <= thr) kept.push_back(targets[k]);
+                        }
+                        if (kept.size() < targets.size())
+                            ROS_INFO_THROTTLE(1.0, "[Plane] 过滤反光 %d 个",
+                                              (int)(targets.size() - kept.size()));
+                        targets.swap(kept);
                     }
                 }
 
@@ -1181,6 +1256,8 @@ private:
     double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
     std::string image_topic_, info_topic_, debug_topic_, detection_topic_, tf_child_;
     int sub_queue_, pub_queue_, min_area_;
+    bool plane_filter_;
+    double plane_dist_ratio_;
     double fcs_min_area_, dedup_px_, teleport_margin_;
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
