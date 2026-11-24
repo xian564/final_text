@@ -60,4 +60,10 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
   - 0.57 时输出 z 均值 3.27m，与真值 3.27m 一致；
   - 3D 误差 0.194m、z 误差 0.175m，为最优；
   - 0.55 误差 0.271m，0.627 误差 0.402m。
-- 说明：该系数吸收“物体点尺寸/四点取法”与真值的系统偏差，换镜头或改尺寸后需重标。
+- 说明：该系数吸收“物体点尺寸/四点取法”与真值的系统偏差。
+- **注意：换镜头或改装甲板尺寸后，`pnp_scale` 需要重新扫一遍。**
+- 重新标定步骤：
+  1. 回放带真值的 bag（如 `red_4_with_detection.bag` 同类数据）；
+  2. 节点输出重映射：`rosrun final_text detect_node_v3 _detection_topic:=/ft/detection_mine _pnp_scale:=X`；
+  3. 与真值 `/ft/detection` 按时间戳对比，扫 `0.50 ~ 0.70`，取 3D/z 误差最小；
+  4. 把最优值写入 `config/params.yaml` 的 `pnp_scale`。
