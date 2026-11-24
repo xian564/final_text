@@ -887,7 +887,7 @@ private:
                         for (int c = 0; c < 4; ++c)
                             quad.push_back(cv::Point((int)tg.corners[c].x,
                                                      (int)tg.corners[c].y));
-                        cv::polylines(canvas, quad, true, cv::Scalar(0, 0, 255), thick);
+                        cv::polylines(canvas, quad, true, cv::Scalar(0, 255, 0), thick);
                         for (int c = 0; c < 4; ++c)
                             cv::circle(canvas, tg.corners[c], 3, cv::Scalar(255, 0, 0), -1);
 
