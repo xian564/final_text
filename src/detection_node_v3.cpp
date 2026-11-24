@@ -297,6 +297,11 @@ private:
         pnh_.setParam("aspect_max", cfg.aspect_max);
         pnh_.setParam("ratio_min", cfg.ratio_min);
         pnh_.setParam("ratio_l_max", cfg.ratio_l_max);
+        pnh_.setParam("ratio_s_max", cfg.ratio_s_max);
+        pnh_.setParam("bar_h_ratio_min", cfg.bar_h_ratio_min);
+        pnh_.setParam("pair_dy_ratio", cfg.pair_dy_ratio);
+        pnh_.setParam("quad_align_min", cfg.quad_align_min);
+        pnh_.setParam("quad_diag_tol", cfg.quad_diag_tol);
         pnh_.setParam("pair_y_ratio", cfg.pair_y_ratio);
         pnh_.setParam("white_enable", cfg.white_enable);
 
@@ -308,6 +313,11 @@ private:
         max_dist_x_ = cfg.max_dist_x; max_angle_diff_ = cfg.max_angle_diff;
         aspect_min_ = cfg.aspect_min; aspect_max_ = cfg.aspect_max;
         ratio_min_ = cfg.ratio_min; ratio_l_max_ = cfg.ratio_l_max;
+        ratio_s_max_ = cfg.ratio_s_max;
+        bar_h_ratio_min_ = cfg.bar_h_ratio_min;
+        pair_dy_ratio_ = cfg.pair_dy_ratio;
+        quad_align_min_ = cfg.quad_align_min;
+        quad_diag_tol_ = cfg.quad_diag_tol;
         pair_y_ratio_ = cfg.pair_y_ratio; white_enable_ = cfg.white_enable;
     }
 
