@@ -66,6 +66,7 @@ public:
         pnh_.param("armor_large_h", armor_large_h_, 0.127);
         pnh_.param("armor_small_w", armor_small_w_, 0.120);
         pnh_.param("armor_small_h", armor_small_h_, 0.125);
+        pnh_.param("pnp_scale", pnp_scale_, 0.57);   // PnP 物体尺寸缩放（测距标定）
         pnh_.param("max_z",       max_z_, 8.0);
         pnh_.param("deadzone_px", deadzone_px_, 5.0);
         pnh_.param("uniqueness_dt", uniqueness_dt_, 0.15);
@@ -330,6 +331,7 @@ private:
         pnh_.getParam("armor_large_h", armor_large_h_);
         pnh_.getParam("armor_small_w", armor_small_w_);
         pnh_.getParam("armor_small_h", armor_small_h_);
+        pnh_.getParam("pnp_scale", pnp_scale_);
         pnh_.getParam("pair_y_ratio", pair_y_ratio_);
         pnh_.getParam("guard_y_ratio", guard_y_ratio_);
         pnh_.getParam("near_area", near_area_);
@@ -682,8 +684,10 @@ private:
 
                         // ---------- solvePnP ----------
                         if (K_.rows == 3 && K_.cols == 3) {
-                            double half_w = (is_large ? armor_large_w_ : armor_small_w_) * 0.5;
-                            double half_h = (is_large ? armor_large_h_ : armor_small_h_) * 0.5;
+                            double half_w = (is_large ? armor_large_w_ : armor_small_w_) * 0.5 *
+                                            pnp_scale_;
+                            double half_h = (is_large ? armor_large_h_ : armor_small_h_) * 0.5 *
+                                            pnp_scale_;
                             std::vector<cv::Point3f> obj;
                             obj.push_back(cv::Point3f(-half_w, -half_h, 0));  // TL
                             obj.push_back(cv::Point3f( half_w, -half_h, 0));  // TR
@@ -1254,6 +1258,7 @@ private:
     double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
     double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
+    double pnp_scale_;
     std::string image_topic_, info_topic_, debug_topic_, detection_topic_, tf_child_;
     int sub_queue_, pub_queue_, min_area_;
     bool plane_filter_;

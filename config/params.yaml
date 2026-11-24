@@ -65,3 +65,5 @@ teleport_margin: 20.0
 
 plane_filter: true
 plane_dist_ratio: 1.0
+
+pnp_scale: 0.57
