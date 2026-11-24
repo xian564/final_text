@@ -2,9 +2,11 @@
 
 ## 装甲板尺寸与 PnP 约定
 
-- 尺寸参数（`config/params.yaml`，单位米），来源考核文档：
-  - 大装甲板：`armor_large_w=0.235`、`armor_large_h=0.127`（235×127 mm）
-  - 小装甲板：`armor_small_w=0.120`、`armor_small_h=0.125`（120×125 mm）
+- 尺寸参数（`config/params.yaml`，单位米），采用**定义一：一对灯条**：
+  - 大装甲板：`armor_large_w=0.230`、`armor_large_h=0.060`（灯条中心距 230mm × 灯条长 60mm）
+  - 小装甲板：`armor_small_w=0.135`、`armor_small_h=0.060`（135mm × 60mm）
+- 大小板判定：`ratio = 透视修正间距 / 灯条长`，小板≈2.25、大板≈3.8，
+  因此 `ratio_s_max=3.0`、`ratio_l_max=5.0`。
 - 代码位置：`src/detection_node_v3.cpp` 参数 63–66 行，热加载 272–275 行，PnP 使用 559–560 行。
 - 顶点定义（旋转四点）：左灯条**左边缘**、右灯条**右边缘**各自的上下角点，按
   **TL → TR → BR → BL** 排列；再按板体长宽比 Wb/bH 把四边形高度拉伸到与板体一致，
@@ -54,7 +56,7 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 
 ## PnP 测距标定（pnp_scale）
 
-- 参数：`pnp_scale`（YAML，默认 0.57），按比例缩放 PnP 物体点，等效修正测距。
+- 参数：`pnp_scale`（YAML，默认 **1.0**），按比例缩放 PnP 物体点；用灯条尺寸建模后无需再压。
 - 标定方法：用 `red_4_with_detection.bag` 的真值 `/ft/detection` 对比，扫
   0.55 / 0.57 / 0.58 / 0.60 / 0.627 / 0.65 / 0.70：
   - 0.57 时输出 z 均值 3.27m，与真值 3.27m 一致；

@@ -58,15 +58,15 @@ public:
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
         pnh_.param("max_dist_x",  max_dist_x_, 500.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
-        pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
-        pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
+        pnh_.param("ratio_s_max", ratio_s_max_, 3.0);
+        pnh_.param("ratio_l_max", ratio_l_max_, 5.0);
         pnh_.param("ratio_min",   ratio_min_, 0.4);
         // 装甲板本体尺寸（米），按考核文档：大 235×127mm，小 120×125mm
-        pnh_.param("armor_large_w", armor_large_w_, 0.235);
-        pnh_.param("armor_large_h", armor_large_h_, 0.127);
-        pnh_.param("armor_small_w", armor_small_w_, 0.120);
-        pnh_.param("armor_small_h", armor_small_h_, 0.125);
-        pnh_.param("pnp_scale", pnp_scale_, 0.57);   // PnP 物体尺寸缩放（测距标定）
+        pnh_.param("armor_large_w", armor_large_w_, 0.230);
+        pnh_.param("armor_large_h", armor_large_h_, 0.060);
+        pnh_.param("armor_small_w", armor_small_w_, 0.135);
+        pnh_.param("armor_small_h", armor_small_h_, 0.060);
+        pnh_.param("pnp_scale", pnp_scale_, 1.0);   // PnP 物体尺寸缩放（测距标定）
         pnh_.param("max_z",       max_z_, 8.0);
         pnh_.param("deadzone_px", deadzone_px_, 5.0);
         pnh_.param("uniqueness_dt", uniqueness_dt_, 0.15);

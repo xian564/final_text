@@ -4,8 +4,8 @@ aspect_max: 6.0
 min_dist_x: 15.0
 max_dist_x: 500.0
 max_angle_diff: 10.0
-ratio_s_max: 1.3
-ratio_l_max: 2.5
+ratio_s_max: 3.0
+ratio_l_max: 5.0
 ratio_min: 0.4
 max_z: 8.0
 deadzone_px: 5.0
@@ -45,10 +45,10 @@ yellow_s_min: 100
 yellow_v_min: 100
 
 # 装甲板本体尺寸（米），来源：考核文档 235x127 / 120x125 mm
-armor_large_w: 0.235
-armor_large_h: 0.127
-armor_small_w: 0.120
-armor_small_h: 0.125
+armor_large_w: 0.230
+armor_large_h: 0.060
+armor_small_w: 0.135
+armor_small_h: 0.060
 
 # 话题 / 队列 / 杂项阈值
 image_topic: /hk_camera/image_raw
@@ -66,4 +66,4 @@ teleport_margin: 20.0
 plane_filter: true
 plane_dist_ratio: 1.0
 
-pnp_scale: 0.57
+pnp_scale: 1.0
