@@ -517,11 +517,16 @@ private:
                                 bars[i].rr = rr;
                                 for (int k = 0; k < 4; ++k) bars[i].pts[k] = pts[k];
                                 bars[i].contour = all;
-                                bars[i].center = cv::Point2f((t1 + std::min(b1, b2)) * 0.5f,
-                                                             (t1 + std::min(b1, b2)) * 0.5f);
-                                bars[i].center = cv::Point2f(
-                                    (bars[i].rr.center.x), (bars[i].rr.center.y));
-                                bars[i].long_h = std::max(b1, b2) - std::min(t1, t2);
+                                bars[i].center = cv::Point2f(rr.center.x, rr.center.y);
+                                // 合并后按新矩形长边重算 tilt / 长边
+                                cv::Point2f e1 = pts[1] - pts[0];
+                                cv::Point2f e2 = pts[2] - pts[1];
+                                cv::Point2f lv = (cv::norm(e1) >= cv::norm(e2)) ? e1 : e2;
+                                double ntl = std::atan2(lv.x, lv.y);
+                                if (ntl > CV_PI / 2) ntl -= CV_PI;
+                                if (ntl < -CV_PI / 2) ntl += CV_PI;
+                                bars[i].tilt = ntl;
+                                bars[i].long_h = std::max(cv::norm(e1), cv::norm(e2));
                                 bars[i].v = std::max(bars[i].v, bars[j].v);
                                 bars.erase(bars.begin() + j);
                                 merged_any = true;
@@ -699,9 +704,12 @@ private:
                         if (bb.width > 2 && bb.height > 2) {
                             cv::Mat hsv_bb = hsv_full(bb);
                             cv::Mat m1, m2, mb;
-                            cv::inRange(hsv_bb, cv::Scalar(red_h_min_, 60, 60), cv::Scalar(red_h_max_, 255, 255), m1);
-                            cv::inRange(hsv_bb, cv::Scalar(170, 60, 60), cv::Scalar(179, 255, 255), m2);
-                            cv::inRange(hsv_bb, cv::Scalar(85, 40, 40), cv::Scalar(140, 255, 255), mb);
+                            cv::inRange(hsv_bb, cv::Scalar(red_h_min_, hsv_sv_min_, hsv_sv_min_),
+                                        cv::Scalar(red_h_max_, 255, 255), m1);
+                            cv::inRange(hsv_bb, cv::Scalar(170, hsv_sv_min_, hsv_sv_min_),
+                                        cv::Scalar(179, 255, 255), m2);
+                            cv::inRange(hsv_bb, cv::Scalar(blue_h_min_, blue_s_min_, blue_v_min_),
+                                        cv::Scalar(blue_h_max_, 255, 255), mb);
                             n_red = cv::countNonZero(m1 | m2);
                             n_blue = cv::countNonZero(mb);
                         }
@@ -860,106 +868,6 @@ private:
                             has_sent_ = true;
                         }
 
-
-                        last_stamp_ = stamp;
-                        last_center2d_ = mt.center2d;
-                        last_is_large_ = mt.is_large;
-                        last_pos_ = avg_t;
-                        last_yaw_ = avg_yaw;
-                        has_last_ = true;
-                        }
-                    }
-
-                    // ---- 绘图 ----
-                    for (size_t k = 0; k < targets.size(); ++k) {
-                        const Target& tg = targets[k];
-                        int thick = (static_cast<int>(k) == best) ? 4 : 2;
-                        cv::rectangle(canvas,
-                                      cv::Rect((int)tg.corners[0].x, (int)tg.corners[0].y,
-                                               (int)(tg.corners[1].x - tg.corners[0].x),
-                                               (int)(tg.corners[3].y - tg.corners[0].y)),
-                                      cv::Scalar(0, 0, 255), thick);
-                        for (int c = 0; c < 4; ++c)
-                            cv::circle(canvas, tg.corners[c], 3, cv::Scalar(255, 0, 0), -1);
-
-                        std::string info = "ID:" + std::to_string(tg.id) +
-                                           (tg.is_large ? " L" : " S");
-                        cv::putText(canvas, info,
-                                    cv::Point((int)tg.corners[0].x,
-                                              std::max(0, (int)tg.corners[0].y - 10)),
-                                    cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                                    cv::Scalar(0, 0, 255), thick > 2 ? 2 : 1);
-                    }
-
-                    // 车体中心十字星
-                    cv::line(canvas, cv::Point((int)vc.x - 12, (int)vc.y),
-                             cv::Point((int)vc.x + 12, (int)vc.y),
-                             cv::Scalar(255, 255, 0), 2);
-                    cv::line(canvas, cv::Point((int)vc.x, (int)vc.y - 12),
-                             cv::Point((int)vc.x, (int)vc.y + 12),
-                             cv::Scalar(255, 255, 0), 2);
-
-                    if (mt.has_pose) {
-                        // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
-                        bool z_outlier = false;
-                        double z_med_ref = mt.z;
-                        if (z_hist_.size() >= 3) {
-                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
-                            std::sort(zs.begin(), zs.end());
-                            z_med_ref = zs[zs.size() / 2];
-                            if (std::abs(mt.z - z_med_ref) > max_z_jump_)
-                                z_outlier = true;
-                        }
-                        if (z_outlier) {
-                            ROS_INFO_THROTTLE(1.0, "[Drop] z 离群 %.2f (中值 %.2f)",
-                                              mt.z, z_med_ref);
-                        } else {
-                        cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
-
-                        cv::Vec3d avg_t;
-                        double avg_yaw = 0.0;
-                        pushSmooth(t2, mt.yaw, avg_t, avg_yaw);
-
-                        // z 中值滤波（窗口 13），压测距抖动
-                        if (mt.id != last_z_id_ || mt.is_large != last_z_large_) {
-                            z_hist_.clear();
-                            last_z_id_ = mt.id;
-                            last_z_large_ = mt.is_large;
-                        }
-                        z_hist_.push_back(mt.z);
-                        while (static_cast<int>(z_hist_.size()) > z_median_win_)
-                            z_hist_.pop_front();
-                        {
-                            std::vector<double> zs(z_hist_.begin(), z_hist_.end());
-                            std::sort(zs.begin(), zs.end());
-                            avg_t[2] = zs[zs.size() / 2];
-                        }
-
-                        // ---- 坐标死区 ----
-                        bool moved = true;
-                        if (has_sent_)
-                            moved = cv::norm(mt.center2d - last_sent_px_) > deadzone_px_;
-
-                        if (moved) {
-                            geometry_msgs::TransformStamped ts;
-                            ts.header.stamp = msg->header.stamp;
-                            ts.header.frame_id = camera_frame_;
-                            ts.child_frame_id = tf_child_;
-                            ts.transform.translation.x = avg_t[0];
-                            ts.transform.translation.y = avg_t[1];
-                            ts.transform.translation.z = avg_t[2];
-
-                            tf2::Quaternion q;
-                            q.setRPY(0.0, 0.0, avg_yaw);
-                            ts.transform.rotation.x = q.x();
-                            ts.transform.rotation.y = q.y();
-                            ts.transform.rotation.z = q.z();
-                            ts.transform.rotation.w = q.w();
-                            tf_broadcaster_.sendTransform(ts);
-
-                            last_sent_px_ = mt.center2d;
-                            has_sent_ = true;
-                        }
 
                         last_stamp_ = stamp;
                         last_center2d_ = mt.center2d;
@@ -1204,6 +1112,7 @@ private:
                         ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
                         if (lost_frames_ >= 5) {
                             has_last_ = false; has_sent_ = false;
+                            prev_had_target_ = false;   // 防止 FCS 用旧特征幽灵锁
                             pos_queue_.clear(); yaw_queue_.clear();
                             size_hist_.clear(); yaw_hist_.clear();
                             z_hist_.clear();
