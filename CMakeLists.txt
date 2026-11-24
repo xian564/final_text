@@ -272,3 +272,11 @@ target_link_libraries(ft_tracker_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+
+
+# ---- v3.1：仅作业要求版本 ----
+add_executable(detect_node_v3_1 src/detection_node_v3_1.cpp)
+target_link_libraries(detect_node_v3_1
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+)
