@@ -882,13 +882,34 @@ private:
                     for (size_t k = 0; k < targets.size(); ++k) {
                         const Target& tg = targets[k];
                         int thick = (static_cast<int>(k) == best) ? 4 : 2;
-                        cv::rectangle(canvas,
-                                      cv::Rect((int)tg.corners[0].x, (int)tg.corners[0].y,
-                                               (int)(tg.corners[1].x - tg.corners[0].x),
-                                               (int)(tg.corners[3].y - tg.corners[0].y)),
-                                      cv::Scalar(0, 0, 255), thick);
+                        // 旋转四点画封闭四边形（随倾角变化）
+                        std::vector<cv::Point> quad;
+                        for (int c = 0; c < 4; ++c)
+                            quad.push_back(cv::Point((int)tg.corners[c].x,
+                                                     (int)tg.corners[c].y));
+                        cv::polylines(canvas, quad, true, cv::Scalar(0, 0, 255), thick);
                         for (int c = 0; c < 4; ++c)
                             cv::circle(canvas, tg.corners[c], 3, cv::Scalar(255, 0, 0), -1);
+
+                        // projectPoints 三轴：原点 -> X/Y/Z（各 3cm）
+                        if (tg.has_pose && tg.has_r) {
+                            std::vector<cv::Point3f> axis;
+                            axis.push_back(cv::Point3f(0, 0, 0));
+                            axis.push_back(cv::Point3f(0.03f, 0, 0));
+                            axis.push_back(cv::Point3f(0, 0.03f, 0));
+                            axis.push_back(cv::Point3f(0, 0, 0.03f));
+                            cv::Mat rvec_ax;
+                            cv::Rodrigues(tg.R, rvec_ax);
+                            cv::Mat tvec_ax = (cv::Mat_<double>(3, 1) <<
+                                               tg.t[0], tg.t[1], tg.t[2]);
+                            std::vector<cv::Point2f> proj;
+                            cv::projectPoints(axis, rvec_ax, tvec_ax, K_, D_, proj);
+                            if (proj.size() == 4) {
+                                cv::line(canvas, proj[0], proj[1], cv::Scalar(0, 0, 255), 2);   // X 红
+                                cv::line(canvas, proj[0], proj[2], cv::Scalar(0, 255, 0), 2);   // Y 绿
+                                cv::line(canvas, proj[0], proj[3], cv::Scalar(255, 0, 0), 2);   // Z 蓝
+                            }
+                        }
 
                         std::string info = "ID:" + std::to_string(tg.id) +
                                            (tg.is_large ? " L" : " S");
