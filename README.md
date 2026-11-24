@@ -78,3 +78,17 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 6. **配对**：间距、高度差、角度差 + 透视修正比例 `dx/cosθ`，按比例区分大/小装甲板。
 7. **四点与 PnP**：左灯条左边缘、右灯条右边缘的上下角点构成旋转四点，按板体长宽比拉高；`solvePnP`（IPPE→ITERATIVE），物体尺寸乘 `pnp_scale`（默认 0.57），并做 `z∈(0.3,15)` 过滤。
 8. **输出**：`/ft/detection`（`ft_msgs/Detections` 数组，含 `id/is_red/is_large_armor/pose`，position=tvec、orientation=rvec 四元数）；主目标平滑后发 TF；debug 图画旋转框、角点和 `projectPoints` 三轴。
+
+## 阈值调优（真值评估）
+
+用 `red_4_with_detection.bag` 真值 `/ft/detection` 评估“precision = 匹配真值帧 / 有输出帧”：
+
+| 配置 | 有输出帧 | FP | precision | 平均误差 |
+|---|---|---|---|---|
+| 原默认（min_area=20, bar_v_min=160） | 475 | 24 | 94.9% | 0.072m |
+| bar_v_min=180 | 357 | 14 | 96.1% | 0.076m |
+| min_area=50 | 336 | 2 | 99.4% | 0.062m |
+| min_area=40 + bar_v_min=170 | 373 | 2 | 99.5% | 0.067m |
+| **当前默认（40/170）** | 498 | 7 | **98.6%** | 0.056m |
+
+说明：调整“过滤条件先后顺序”不改变结果（条件之间是逻辑与），只会影响速度；真正降低误判的是阈值。当前默认取 `min_area=40`、`bar_v_min=170`。

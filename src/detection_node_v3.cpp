@@ -76,7 +76,7 @@ public:
         pnh_.param("red_h_min",    red_h_min_, 0);
         pnh_.param("red_h_max",    red_h_max_, 10);
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
-        pnh_.param("bar_v_min",    bar_v_min_, 160);
+        pnh_.param("bar_v_min",    bar_v_min_, 170);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
         pnh_.param("z_median_win", z_median_win_, 13);
                 pnh_.param("max_z_jump",    max_z_jump_, 1.5);
@@ -112,7 +112,7 @@ public:
         pnh_.param("sub_queue", sub_queue_, 1);
         pnh_.param("pub_queue", pub_queue_, 1);
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
-        pnh_.param("min_area", min_area_, 20);
+        pnh_.param("min_area", min_area_, 40);
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
         pnh_.param("dedup_px", dedup_px_, 120.0);
         pnh_.param("teleport_margin", teleport_margin_, 20.0);

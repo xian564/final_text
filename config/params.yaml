@@ -16,7 +16,7 @@ red_h_min: 0
 red_h_max: 10
 hsv_sv_min: 100
 roi_y_ratio: 0.0
-bar_v_min: 160
+bar_v_min: 170
 bar_keep_n: 6
 z_median_win: 13
 max_z_jump: 1.5
@@ -58,7 +58,7 @@ detection_topic: /ft/detection
 sub_queue: 1
 pub_queue: 1
 tf_child_frame: armor_v3
-min_area: 20
+min_area: 40
 fcs_min_area: 150.0
 dedup_px: 120.0
 teleport_margin: 20.0
