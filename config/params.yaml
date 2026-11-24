@@ -67,3 +67,8 @@ plane_filter: true
 plane_dist_ratio: 1.0
 
 pnp_scale: 1.0
+
+bar_h_ratio_min: 0.6
+pair_dy_ratio: 0.4
+quad_align_min: 0.6
+quad_diag_tol: 0.35

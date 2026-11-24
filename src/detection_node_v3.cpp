@@ -60,6 +60,10 @@ public:
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
         pnh_.param("ratio_s_max", ratio_s_max_, 3.0);
         pnh_.param("ratio_l_max", ratio_l_max_, 5.0);
+        pnh_.param("bar_h_ratio_min", bar_h_ratio_min_, 0.6);   // 两灯条高度比下限
+        pnh_.param("pair_dy_ratio", pair_dy_ratio_, 0.4);       // 两灯条竖直错位上限（×灯条长）
+        pnh_.param("quad_align_min", quad_align_min_, 0.6);     // 四边形对边一致性下限
+        pnh_.param("quad_diag_tol", quad_diag_tol_, 0.35);      // 对角线差上限（相对）
         pnh_.param("ratio_min",   ratio_min_, 0.4);
         // 装甲板本体尺寸（米），按考核文档：大 235×127mm，小 120×125mm
         pnh_.param("armor_large_w", armor_large_w_, 0.230);
@@ -332,6 +336,10 @@ private:
         pnh_.getParam("armor_small_w", armor_small_w_);
         pnh_.getParam("armor_small_h", armor_small_h_);
         pnh_.getParam("pnp_scale", pnp_scale_);
+        pnh_.getParam("bar_h_ratio_min", bar_h_ratio_min_);
+        pnh_.getParam("pair_dy_ratio", pair_dy_ratio_);
+        pnh_.getParam("quad_align_min", quad_align_min_);
+        pnh_.getParam("quad_diag_tol", quad_diag_tol_);
         pnh_.getParam("pair_y_ratio", pair_y_ratio_);
         pnh_.getParam("guard_y_ratio", guard_y_ratio_);
         pnh_.getParam("near_area", near_area_);
@@ -619,6 +627,12 @@ private:
                         double ratio = corrected / long_h;
                         if (ratio > ratio_l_max_ || ratio < ratio_min_) continue; // 幽灵
 
+                        double hmin = std::min(bars[i].long_h, bars[j].long_h);
+                        double hmax = std::max(bars[i].long_h, bars[j].long_h);
+                        if (hmin < bar_h_ratio_min_ * hmax) continue;          // 灯条高度差过大
+                        if (std::abs(bars[i].center.y - bars[j].center.y) >
+                            pair_dy_ratio_ * std::max(1.0, hmin)) continue;    // 竖直错位
+
                         bool is_large = (ratio > ratio_s_max_);
 
                         // ---------- 旋转四点：左灯条左边缘 + 右灯条右边缘 ----------
@@ -657,6 +671,19 @@ private:
                                 rb.y = cyy + (rb.y - cyy) * sy;
                                 lb.y = cyy + (lb.y - cyy) * sy;
                             }
+                        }
+
+                        // 四点矩形性：对边/对角线一致性，剔除斜四边形
+                        {
+                            double wt = cv::norm(rt - lt);
+                            double wb = cv::norm(rb - lb);
+                            double hl = cv::norm(lb - lt);
+                            double hr = cv::norm(rb - rt);
+                            if (std::min(wt, wb) < quad_align_min_ * std::max(wt, wb)) continue;
+                            if (std::min(hl, hr) < quad_align_min_ * std::max(hl, hr)) continue;
+                            double d1 = cv::norm(rb - lt);
+                            double d2 = cv::norm(rt - lb);
+                            if (std::abs(d1 - d2) > quad_diag_tol_ * std::max(d1, d2)) continue;
                         }
 
                         Target tg;
@@ -1261,6 +1288,7 @@ private:
     double aspect_min_, aspect_max_;
     double min_dist_x_, max_dist_x_, max_angle_diff_;
     double ratio_s_max_, ratio_l_max_, ratio_min_;
+    double bar_h_ratio_min_, pair_dy_ratio_, quad_align_min_, quad_diag_tol_;
     double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
     double pnp_scale_;
     std::string image_topic_, info_topic_, debug_topic_, detection_topic_, tf_child_;
