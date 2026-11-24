@@ -67,3 +67,14 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
   2. 节点输出重映射：`rosrun final_text detect_node_v3 _detection_topic:=/ft/detection_mine _pnp_scale:=X`；
   3. 与真值 `/ft/detection` 按时间戳对比，扫 `0.50 ~ 0.70`，取 3D/z 误差最小；
   4. 把最优值写入 `config/params.yaml` 的 `pnp_scale`。
+
+## v3 识别流程（简版）
+
+1. **图像接入**：订阅 compressed 图 + 缓存 `camera_info`，`header.stamp` 用图像时间戳。
+2. **HSV 分色**：红色两段（0~10、170~179）+ 蓝色 + 黄色，形态学开运算去噪。
+3. **高光守卫**：取 V 通道最亮点；若最亮点在画面底部（`guard_y_ratio`），判为地面反光，**屏蔽底部区域，取次高光的灯条**继续识别。
+4. **轮廓 → 灯条**：面积、长宽比、框内平均亮度过滤，矩质心定中心，角度归一化。
+5. **清洗**：断笔合并（共线短灯条拼接）+ 共面过滤（离装甲平面超过灯条长度的判为反光）。
+6. **配对**：间距、高度差、角度差 + 透视修正比例 `dx/cosθ`，按比例区分大/小装甲板。
+7. **四点与 PnP**：左灯条左边缘、右灯条右边缘的上下角点构成旋转四点，按板体长宽比拉高；`solvePnP`（IPPE→ITERATIVE），物体尺寸乘 `pnp_scale`（默认 0.57），并做 `z∈(0.3,15)` 过滤。
+8. **输出**：`/ft/detection`（`ft_msgs/Detections` 数组，含 `id/is_red/is_large_armor/pose`，position=tvec、orientation=rvec 四元数）；主目标平滑后发 TF；debug 图画旋转框、角点和 `projectPoints` 三轴。

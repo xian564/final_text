@@ -382,7 +382,11 @@ private:
             // 2) 全局空间守卫：最亮点在画面极底部 -> 大概率地面反光
             bool guard_block = (max_loc.y > height_ * guard_y_ratio_);
             if (guard_block) {
-                ROS_INFO_THROTTLE(1.0, "[Guard] 最亮点在底部 y=%d, 跳过本帧", max_loc.y);
+                // 最亮点在底部：判为地面反光，屏蔽底部区域，用其余灯条继续识别
+                int y0 = (int)(height_ * guard_y_ratio_);
+                if (y0 > 0 && y0 < colored.rows)
+                    colored.rowRange(y0, colored.rows).setTo(cv::Scalar(0, 0, 0));
+                ROS_INFO_THROTTLE(1.0, "[Guard] 底部反光 y=%d，取次高光灯条", max_loc.y);
             }
 
             // 3) 动态高亮掩膜（解决过曝）
@@ -393,7 +397,7 @@ private:
             const double stamp = msg->header.stamp.toSec();
             int lost_this_frame = 1;
 
-            if (!colored.empty() && !guard_block) {
+            if (!colored.empty()) {
                 // 显示用底板：保留原始相机画面（不再用分割结果覆盖成黑底）
                 // canvas 仍是 img.clone() + 绿框，检测/绘制都叠加在原视频上
                 // =======================================================
