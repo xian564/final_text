@@ -77,8 +77,8 @@ public:
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
-        pnh_.param("plane_filter", plane_filter_, true);
-        pnh_.param("plane_dist_ratio", plane_dist_ratio_, 1.0);
+        pnh_.param("hold_frames", hold_frames_, 8);
+        pnh_.param("hold_max_speed", hold_max_speed_, 8.0);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
@@ -426,34 +426,6 @@ private:
                           });
 
                 // =======================================================
-                // ---- 共面过滤：最多灯条共识定平面，离面超过灯条长度的当反光 ----
-                if (plane_filter_ && bars.size() >= 3) {
-                    int best_cnt = 0;
-                    std::vector<int> best_keep;
-                    for (size_t i = 0; i < bars.size(); ++i) {
-                        for (size_t j = i + 1; j < bars.size(); ++j) {
-                            cv::Point2f A = bars[i].center, B = bars[j].center;
-                            cv::Point2f dir = B - A;
-                            double dl = cv::norm(dir);
-                            if (dl < 1.0) continue;
-                            cv::Point2f n(-dir.y / dl, dir.x / dl);
-                            double thr = std::max(bars[i].long_h, bars[j].long_h) * plane_dist_ratio_;
-                            std::vector<int> keep;
-                            for (size_t k = 0; k < bars.size(); ++k) {
-                                double d = std::abs((bars[k].center.x - A.x) * n.x +
-                                                    (bars[k].center.y - A.y) * n.y);
-                                if (d <= thr) keep.push_back((int)k);
-                            }
-                            if ((int)keep.size() > best_cnt) { best_cnt = (int)keep.size(); best_keep = keep; }
-                        }
-                    }
-                    if (best_cnt >= 2 && best_cnt < (int)bars.size()) {
-                        std::vector<Bar> kept;
-                        for (size_t k = 0; k < best_keep.size(); ++k) kept.push_back(bars[best_keep[k]]);
-                        bars.swap(kept);
-                    }
-                }
-
                 // 2. 配对 + 几何修正 + 幽灵剔除
                 // =======================================================
                 std::vector<Target> targets;
@@ -747,6 +719,16 @@ private:
                         }
 
 
+                        if (has_vsample_ && stamp > v_prev_stamp_ + 1e-4) {
+                            double vdt = stamp - v_prev_stamp_;
+                            cv::Vec3d nv = (avg_t - v_prev_pos_) * (1.0 / vdt);
+                            if (cv::norm(nv) <= max_speed_) { vel_ = nv; has_vel_ = true; }
+                            else has_vel_ = false;
+                        }
+                        v_prev_pos_ = avg_t;
+                        v_prev_stamp_ = stamp;
+                        has_vsample_ = true;
+
                         last_stamp_ = stamp;
                         last_center2d_ = mt.center2d;
                         last_is_large_ = mt.is_large;
@@ -814,12 +796,41 @@ private:
                     }
 
                 } else {
+                    // ---- 丢帧匀速外推：最近两帧速度直线外推，维持轨迹 ----
+                    bool pred_ok = false;
+                    if (has_last_ && has_vel_ && lost_frames_ < hold_frames_) {
+                        double pdt = stamp - v_prev_stamp_;
+                        if (pdt > 0.0 && pdt < 0.5 && cv::norm(vel_) <= hold_max_speed_) {
+                            cv::Vec3d pp = v_prev_pos_ + vel_ * pdt;
+                            geometry_msgs::TransformStamped ts;
+                            ts.header.stamp = msg->header.stamp;
+                            ts.header.frame_id = camera_frame_;
+                            ts.child_frame_id = tf_child_;
+                            ts.transform.translation.x = pp[0];
+                            ts.transform.translation.y = pp[1];
+                            ts.transform.translation.z = pp[2];
+                            tf2::Quaternion q;
+                            q.setRPY(0.0, 0.0, last_yaw_);
+                            ts.transform.rotation.x = q.x();
+                            ts.transform.rotation.y = q.y();
+                            ts.transform.rotation.z = q.z();
+                            ts.transform.rotation.w = q.w();
+                            tf_broadcaster_.sendTransform(ts);
+                            cv::putText(canvas, "PRED", cv::Point(70, 64),
+                                        cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                                        cv::Scalar(0, 200, 255), 2);
+                            pred_ok = true;
+                        }
+                    }
                     ++lost_frames_;
-                    if (lost_frames_ >= 5) {
+                    if (lost_frames_ >= std::max(hold_frames_, 5)) {
                         has_last_ = false; has_sent_ = false;
+                        has_vel_ = false; has_vsample_ = false;
                         pos_queue_.clear(); yaw_queue_.clear();
                         lost_frames_ = 0;
                     }
+                    ROS_INFO_THROTTLE(0.5, pred_ok ? "[Hold] 匀速外推 %d/%d" : "[Hold] 丢帧 %d/%d",
+                                      lost_frames_, hold_frames_);
                 }
             } else {
                 ++lost_frames_;
@@ -864,8 +875,6 @@ private:
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
-    bool plane_filter_;
-    double plane_dist_ratio_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
@@ -887,6 +896,11 @@ private:
     double last_yaw_ = 0.0;
     double omega_deg_s_ = 0.0;
     int lost_frames_ = 0;
+    int    hold_frames_;
+    double hold_max_speed_;
+    bool   has_vsample_ = false, has_vel_ = false;
+    cv::Vec3d v_prev_pos_{0, 0, 0}, vel_{0, 0, 0};
+    double v_prev_stamp_ = 0.0;
     int  assist_left_ = 0;
     int  assist_lost_ = 0;
 
