@@ -377,6 +377,34 @@ private:
     }
 
     // ---------- 图像回调 ----------
+    // ============================================================
+    // 数据流总览（变量怎么走）
+    //   Image msg → bgr → colorSegment → colored
+    //        ├─ cvtColor → hsv_full → v_chan（亮度/高光守卫）
+    //        └─ cvtColor → seg_mask → findContours → contours
+    //                                                    └→ bars（灯条）
+    //                                                         └→ targets（候选）
+    //                                                              └→ best → mt
+    //                                                                   └→ rvec/tvec
+    //                                                                        ├→ avg_t/avg_yaw → TF armor_v3
+    //                                                                        └→ /ft/detection
+    //   canvas（绘图底板）→ /ft/debug/image
+    //   丢帧：vel_ + v_prev_pos_ → 预测 TF(PRED)；FCS 用 prev_center2d_ 残影
+    //
+    //   关键变量去向：
+    //     colored    → hsv_full / seg_mask            （颜色与灰度）
+    //     hsv_full   → inRange                        （颜色掩膜）
+    //     v_chan     → max_v/high_mask/bar_v_min      （高光与亮度过滤）
+    //     seg_mask   → findContours                   （轮廓）
+    //     contours   → 面积/长宽比/亮度 → bars         （灯条）
+    //     bars       → 断笔合并/共面/配对 → targets     （候选）
+    //     targets    → best → mt                      （主目标）
+    //     rvec/tvec  → Target.t → avg_t/avg_yaw → TF  （位姿）
+    //     tvec       → /ft/detection                  （下游跟踪）
+    //     prev_center2d_/prev_had_target_ → 锁定/FCS/外推
+    //     vel_/v_prev_pos_ → 丢帧预测 TF
+    // ============================================================
+
     void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
         if (!is_ready_.load()) return;
 
@@ -394,6 +422,7 @@ private:
                           cv::Scalar(0, 255, 0), 2);
 
             cv::Mat colored;
+            // [flow] colored：颜色分割结果 → hsv_full / seg_mask
             colorSegment(canvas, colored,
                          cv::Scalar(red_h_min_, hsv_sv_min_, hsv_sv_min_), cv::Scalar(red_h_max_, 255, 255),
                          cv::Scalar(blue_h_min_, blue_s_min_, blue_v_min_), cv::Scalar(blue_h_max_, 255, 255),
@@ -437,6 +466,7 @@ private:
                 // =======================================================
                 // 1. 灯条提取：矩质心 + 长宽比 2.0~6.0
                 // =======================================================
+                // [flow] bars：灯条集合 → 断笔合并/共面过滤/配对 → targets
                 std::vector<Bar> bars;
                 std::vector<std::vector<cv::Point>> contours;
                 cv::Mat seg_mask;
@@ -651,6 +681,7 @@ private:
                 // =======================================================
                 // 2. 配对 + 几何修正 + 幽灵剔除
                 // =======================================================
+                // [flow] targets：候选目标 → best → mt → PnP/平滑/TF
                 std::vector<Target> targets;
                 int armor_id = 1;
 
@@ -971,6 +1002,7 @@ private:
 
 
                     // ---- 目标选择：相邻帧优先锁同一块装甲板 ----
+                    // [flow] best：选中索引（相邻帧中心锁定优先）→ mt
                     int best = 0;
                     bool locked = false;
                     if (prev_had_target_) {
@@ -1013,6 +1045,7 @@ private:
                         } else {
                         cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
 
+                        // [flow] avg_t/avg_yaw：平滑位姿 → TF / Detections
                         cv::Vec3d avg_t;
                         double avg_yaw = 0.0;
                         pushSmooth(t2, mt.yaw, avg_t, avg_yaw);
@@ -1486,6 +1519,7 @@ private:
     double last_stamp_ = 0.0;
     cv::Point2f last_center2d_ = cv::Point2f(0, 0);
     bool last_is_large_ = false;
+    // [flow] last_pos_/vel_/v_prev_pos_：成功帧更新 → 丢帧匀速外推 TF
     cv::Vec3d last_pos_ = cv::Vec3d(0, 0, 0);
     double last_yaw_ = 0.0;
     double omega_deg_s_ = 0.0;
