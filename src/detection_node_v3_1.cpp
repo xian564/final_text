@@ -213,19 +213,19 @@ private:
                            const cv::Scalar& c, int thick) {
         int step = 8;
         for (int x = r.x; x < r.x + r.width; x += step * 2)
-            // [cv] line：画线到 img（debug）
+            // [cv] line：画线到 img
             cv::line(img, cv::Point(x, r.y),
                      cv::Point(std::min(x + step, r.x + r.width), r.y), c, thick);
         for (int x = r.x; x < r.x + r.width; x += step * 2)
-            // [cv] line：画线到 img（debug）
+            // [cv] line：画线到 img
             cv::line(img, cv::Point(x, r.y + r.height),
                      cv::Point(std::min(x + step, r.x + r.width), r.y + r.height), c, thick);
         for (int y = r.y; y < r.y + r.height; y += step * 2)
-            // [cv] line：画线到 img（debug）
+            // [cv] line：画线到 img
             cv::line(img, cv::Point(r.x, y),
                      cv::Point(r.x, std::min(y + step, r.y + r.height)), c, thick);
         for (int y = r.y; y < r.y + r.height; y += step * 2)
-            // [cv] line：画线到 img（debug）
+            // [cv] line：画线到 img
             cv::line(img, cv::Point(r.x + r.width, y),
                      cv::Point(r.x + r.width, std::min(y + step, r.y + r.height)), c, thick);
     }
@@ -235,7 +235,7 @@ private:
         cv::Rect r = rect & cv::Rect(0, 0, v.cols, v.rows);
         if (r.width < 3 || r.height < 3) return 0.0;
         cv::Mat m = cv::Mat::zeros(v.size(), CV_8UC1);
-        // [cv] rectangle：画矩形到 m（debug）
+        // [cv] rectangle：画矩形到 m
         cv::rectangle(m, r, 255, cv::FILLED);
         cv::Mat md;
         // [cv] dilate：m → md，膨胀补断裂
@@ -243,9 +243,9 @@ private:
                                                     cv::Size(11, 11)));
         cv::Mat ring;
         cv::subtract(md, m, ring);
-        // [cv] mean：v 掩膜内均值，亮度/颜色判别
+        // [cv] mean：v 掩膜内均值
         double inner = cv::mean(v, m)[0];
-        // [cv] mean：v 掩膜内均值，亮度/颜色判别
+        // [cv] mean：v 掩膜内均值
         double outer = cv::mean(v, ring)[0];
         return inner - outer;
     }
@@ -264,7 +264,7 @@ private:
         };
         for (int i = 0; i < 4; ++i) {
             double mx = 0.0;
-            // [cv] minMaxLoc：最亮值/位置 → max_v/max_loc，反光守卫
+            // [cv] minMaxLoc：最亮值/位置 → max_v/max_loc
             cv::minMaxLoc(v(q[i]), nullptr, &mx);
             out[i] = mx;
         }
@@ -316,7 +316,7 @@ private:
             cv::Mat canvas = img.clone();
 
             // 保留原版 debug 绿框（绝对不动）
-            // [cv] rectangle：画矩形到 canvas（debug）
+            // [cv] rectangle：画矩形到 canvas
             cv::rectangle(canvas, cv::Rect(10, 10, 50, 50),
                           cv::Scalar(0, 255, 0), 2);
 
@@ -330,14 +330,14 @@ private:
 
             // 亮度筛选用：单独提取 V 通道
             cv::Mat hsv_full, v_chan;
-            // [cv] cvtColor：canvas → hsv_full（HSV/灰度），供颜色或亮度处理
+            // [cv] cvtColor：canvas → hsv_full（HSV/灰度）；下游：inRange 取颜色掩膜
             cv::cvtColor(canvas, hsv_full, cv::COLOR_BGR2HSV);
             cv::extractChannel(hsv_full, v_chan, 2);
 
             // 1) 全图最高光定位
             double max_v = 0.0;
             cv::Point max_loc;
-            // [cv] minMaxLoc：最亮值/位置 → max_v/max_loc，反光守卫
+            // [cv] minMaxLoc：最亮值/位置 → max_v/max_loc
             cv::minMaxLoc(v_chan, nullptr, &max_v, nullptr, &max_loc);
 
             // 2) 全局空间守卫：最亮点在画面极底部 -> 大概率地面反光
@@ -363,7 +363,7 @@ private:
                 std::vector<Bar> bars;
                 std::vector<std::vector<cv::Point>> contours;
                 cv::Mat seg_mask;
-                // [cv] cvtColor：colored → seg_mask（HSV/灰度），供颜色或亮度处理
+                // [cv] cvtColor：colored → seg_mask（HSV/灰度）；下游：形态学 → findContours 取轮廓
                 cv::cvtColor(colored, seg_mask, cv::COLOR_BGR2GRAY);
 
                 // 3) 过曝中心融合：颜色区域膨胀后与高亮 mask 相交，再并入分割 mask
@@ -371,25 +371,25 @@ private:
                     cv::Mat color_mask, color_dil, high_fused;
                     // [cv] threshold：seg_mask 二值化 → color_mask
                     cv::threshold(seg_mask, color_mask, 1, 255, cv::THRESH_BINARY);
-                    // [cv] getStructuringElement：构造形态学核，供膨胀/开运算
+                    // [cv] getStructuringElement：构造形态学核
                     cv::Mat k3 = cv::getStructuringElement(cv::MORPH_RECT,
                                                            cv::Size(3, 3));
                     // [cv] dilate：color_mask → color_dil，膨胀补断裂
                     cv::dilate(color_mask, color_dil, k3, cv::Point(-1, -1), 2);
-                    // [cv] bitwise_and：掩膜相交 → high_fused，只保留有效像素
+                    // [cv] bitwise_and：掩膜相交 → high_fused
                     cv::bitwise_and(high_mask, color_dil, high_fused);
-                    // [cv] bitwise_or：合并掩膜 → seg_mask，得到候选颜色区域
+                    // [cv] bitwise_or：合并掩膜 → seg_mask；下游：形态学 → findContours 取轮廓
                     cv::bitwise_or(seg_mask, high_fused, seg_mask);
                 }
 
-                // [cv] findContours：从 seg_mask 提取 → contours，逐个筛成灯条
+                // [cv] findContours：从 seg_mask 提取 → contours；下游：逐轮廓筛成灯条 bars
                 cv::findContours(seg_mask, contours, cv::RETR_EXTERNAL,
                                  cv::CHAIN_APPROX_SIMPLE);
 
                 for (size_t i = 0; i < contours.size(); ++i) {
-                    // [cv] contourArea：算 contours[i] 面积，过滤噪点/判灯条
+                    // [cv] contourArea：算 cv::contourArea(contours[i]) < min_area_ 面积
                     if (cv::contourArea(contours[i]) < min_area_) continue;
-                    // [cv] minAreaRect：contours[i] → rr（中心/长宽/倾角），灯条几何
+                    // [cv] minAreaRect：contours[i] → rr（中心/长宽/倾角）；下游：生成 Bar（中心/长宽/角度）
                     cv::RotatedRect rr = cv::minAreaRect(contours[i]);
                     double w = rr.size.width, h = rr.size.height;
                     if (std::min(w, h) <= 0) continue;
@@ -400,7 +400,7 @@ private:
                     cv::Mat cmask(canvas.size(), CV_8UC1, cv::Scalar(0));
                     cv::drawContours(cmask, contours, static_cast<int>(i),
                                      cv::Scalar(255), cv::FILLED);
-                    // [cv] mean：v_chan 掩膜内均值，亮度/颜色判别
+                    // [cv] mean：v_chan 掩膜内均值
                     double mean_v = cv::mean(v_chan, cmask)[0];
                     if (mean_v < bar_v_min_) continue;
 
@@ -417,13 +417,13 @@ private:
 
                     cv::Point2f e1 = bar.pts[1] - bar.pts[0];
                     cv::Point2f e2 = bar.pts[2] - bar.pts[1];
-                    // [cv] norm：距离/长度 → ，配对/去重/锁定
+                    // [cv] norm：距离/长度 → 
                     cv::Point2f lv = (cv::norm(e1) >= cv::norm(e2)) ? e1 : e2;
                     double tilt = std::atan2(lv.x, lv.y);
                     if (tilt > CV_PI / 2) tilt -= CV_PI;
                     if (tilt < -CV_PI / 2) tilt += CV_PI;
                     bar.tilt = tilt;
-                    // [cv] norm：距离/长度 → ，配对/去重/锁定
+                    // [cv] norm：距离/长度 → 
                     bar.long_h = std::max(cv::norm(e1), cv::norm(e2));
                     bar.v = mean_v;
                     bar.contour = contours[i];
@@ -435,7 +435,7 @@ private:
                     bars.push_back(bar);
 
                     for (int k = 0; k < 4; ++k)
-                        // [cv] line：画线到 canvas（debug）
+                        // [cv] line：画线到 canvas
                         cv::line(canvas, bar.pts[k], bar.pts[(k + 1) % 4],
                                  cv::Scalar(0, 255, 255), 2);
                 }
@@ -501,9 +501,9 @@ private:
                         {
                             double W = is_large ? armor_large_w_ : armor_small_w_;
                             double H = is_large ? armor_large_h_ : armor_small_h_;
-                            // [cv] norm：距离/长度 → ，配对/去重/锁定
+                            // [cv] norm：距离/长度 → 
                             float wpx = (float)cv::norm(rt - lt);
-                            // [cv] norm：距离/长度 → ，配对/去重/锁定
+                            // [cv] norm：距离/长度 → 
                             float cur_h = 0.5f * ((float)cv::norm(lb - lt) + (float)cv::norm(rb - rt));
                             float target_h = wpx * (float)(H / std::max(1e-6, W));
                             if (cur_h > 2.0f && target_h > 2.0f) {
@@ -538,7 +538,7 @@ private:
                         // 去重：中心距离 <25px 视为同一块板，避免同一根灯条被拆段后重复配对
                         bool dup = false;
                         for (size_t d = 0; d < targets.size(); ++d) {
-                            // [cv] norm：距离/长度 → ，配对/去重/锁定
+                            // [cv] norm：距离/长度 → 
                             if (cv::norm(targets[d].center2d - tg.center2d) < dedup_px_) {
                                 dup = true; break;
                             }
@@ -556,11 +556,11 @@ private:
                             obj.push_back(cv::Point3f(-half_w,  half_h, 0));  // BL
 
                             cv::Mat rvec, tvec;
-                            // [cv] solvePnP：物体点+四点 → rvec/tvec，装甲位姿
+                            // [cv] solvePnP：物体点+四点 → rvec/tvec
                             bool ok = cv::solvePnP(obj, tg.corners, K_, D_,
                                                    rvec, tvec, false, cv::SOLVEPNP_IPPE);
                             if (!ok)
-                                // [cv] solvePnP：物体点+四点 → rvec/tvec，装甲位姿
+                                // [cv] solvePnP：物体点+四点 → rvec/tvec
                                 ok = cv::solvePnP(obj, tg.corners, K_, D_,
                                                   rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
                             if (ok && tvec.at<double>(2) > 0.3 &&
@@ -571,7 +571,7 @@ private:
                                                  tvec.at<double>(2));
                                 tg.z = tg.t[2];
                                 cv::Mat R;
-                                // [cv] Rodrigues：rvec ↔ R，供四元数/TF
+                                // [cv] Rodrigues：rvec ↔ R；下游：yaw/四元数 → TF
                                 cv::Rodrigues(rvec, R);
                                 tg.R = R.clone();
                                 tg.has_r = true;
@@ -614,18 +614,18 @@ private:
                         if (bb.width > 2 && bb.height > 2) {
                             cv::Mat hsv_bb = hsv_full(bb);
                             cv::Mat m1, m2, mb;
-                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜），供形态学/轮廓
+                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜）
                             cv::inRange(hsv_bb, cv::Scalar(red_h_min_, hsv_sv_min_, hsv_sv_min_),
                                         cv::Scalar(red_h_max_, 255, 255), m1);
-                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜），供形态学/轮廓
+                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜）
                             cv::inRange(hsv_bb, cv::Scalar(170, hsv_sv_min_, hsv_sv_min_),
                                         cv::Scalar(179, 255, 255), m2);
-                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜），供形态学/轮廓
+                            // [cv] inRange：hsv_bb 上取阈值 → （0/255 掩膜）
                             cv::inRange(hsv_bb, cv::Scalar(blue_h_min_, blue_s_min_, blue_v_min_),
                                         cv::Scalar(blue_h_max_, 255, 255), mb);
-                            // [cv] countNonZero：m1 | m2 计数，红蓝占比
+                            // [cv] countNonZero：m1 | m2 计数
                             n_red = cv::countNonZero(m1 | m2);
-                            // [cv] countNonZero：mb 计数，红蓝占比
+                            // [cv] countNonZero：mb 计数
                             n_blue = cv::countNonZero(mb);
                         }
                         d.is_red = (n_red >= n_blue);
@@ -692,7 +692,7 @@ private:
                             double fx = K_.at<double>(0, 0);
                             double max_px = fx * max_speed_ * dt /
                                             std::max(0.5, targets[k].z) * 1.5 + teleport_margin_;
-                            // [cv] norm：距离/长度 → d，配对/去重/锁定
+                            // [cv] norm：距离/长度 → d
                             double d = cv::norm(targets[k].center2d - last_center2d_);
                             if (d > max_px) {
                                 ROS_INFO_THROTTLE(1.0, "[Drop] 瞬移 %.1f px > %.1f", d, max_px);
@@ -733,7 +733,7 @@ private:
                         // ---- 坐标死区 ----
                         bool moved = true;
                         if (has_sent_)
-                            // [cv] norm：距离/长度 → moved，配对/去重/锁定
+                            // [cv] norm：距离/长度 → moved
                             moved = cv::norm(mt.center2d - last_sent_px_) > deadzone_px_;
 
                         if (moved) {
@@ -761,7 +761,7 @@ private:
                         if (has_vsample_ && stamp > v_prev_stamp_ + 1e-4) {
                             double vdt = stamp - v_prev_stamp_;
                             cv::Vec3d nv = (avg_t - v_prev_pos_) * (1.0 / vdt);
-                            // [cv] norm：距离/长度 → ，配对/去重/锁定
+                            // [cv] norm：距离/长度 → 
                             if (cv::norm(nv) <= max_speed_) { vel_ = nv; has_vel_ = true; }
                             else has_vel_ = false;
                         }
@@ -787,10 +787,10 @@ private:
                         for (int c = 0; c < 4; ++c)
                             quad.push_back(cv::Point((int)tg.corners[c].x,
                                                      (int)tg.corners[c].y));
-                        // [cv] polylines：画四边形到 canvas（debug）
+                        // [cv] polylines：画四边形到 canvas
                         cv::polylines(canvas, quad, true, cv::Scalar(0, 0, 255), thick);
                         for (int c = 0; c < 4; ++c)
-                            // [cv] circle：画角点到 canvas（debug）
+                            // [cv] circle：画角点到 canvas
                             cv::circle(canvas, tg.corners[c], 3, cv::Scalar(255, 0, 0), -1);
 
                         // projectPoints 三轴：原点 -> X/Y/Z（各 3cm）
@@ -801,26 +801,26 @@ private:
                             axis.push_back(cv::Point3f(0, 0.03f, 0));
                             axis.push_back(cv::Point3f(0, 0, 0.03f));
                             cv::Mat rvec_ax;
-                            // [cv] Rodrigues：tg.R ↔ rvec_ax，供四元数/TF
+                            // [cv] Rodrigues：tg.R ↔ rvec_ax
                             cv::Rodrigues(tg.R, rvec_ax);
                             cv::Mat tvec_ax = (cv::Mat_<double>(3, 1) <<
                                                tg.t[0], tg.t[1], tg.t[2]);
                             std::vector<cv::Point2f> proj;
-                            // [cv] projectPoints：3D 轴点 → D_ 像素，画三轴
+                            // [cv] projectPoints：3D 轴点 → D_ 像素
                             cv::projectPoints(axis, rvec_ax, tvec_ax, K_, D_, proj);
                             if (proj.size() == 4) {
-                                // [cv] line：画线到 canvas（debug）
+                                // [cv] line：画线到 canvas
                                 cv::line(canvas, proj[0], proj[1], cv::Scalar(0, 0, 255), 2);   // X 红
-                                // [cv] line：画线到 canvas（debug）
+                                // [cv] line：画线到 canvas
                                 cv::line(canvas, proj[0], proj[2], cv::Scalar(0, 255, 0), 2);   // Y 绿
-                                // [cv] line：画线到 canvas（debug）
+                                // [cv] line：画线到 canvas
                                 cv::line(canvas, proj[0], proj[3], cv::Scalar(255, 0, 0), 2);   // Z 蓝
                             }
                         }
 
                         std::string info = "ID:" + std::to_string(tg.id) +
                                            (tg.is_large ? " L" : " S");
-                        // [cv] putText：文字到 canvas（debug）
+                        // [cv] putText：文字到 canvas
                         cv::putText(canvas, info,
                                     cv::Point((int)tg.corners[0].x,
                                               std::max(0, (int)tg.corners[0].y - 10)),
@@ -829,11 +829,11 @@ private:
                     }
 
                     // 车体中心十字星
-                    // [cv] line：画线到 canvas（debug）
+                    // [cv] line：画线到 canvas
                     cv::line(canvas, cv::Point((int)vc.x - 12, (int)vc.y),
                              cv::Point((int)vc.x + 12, (int)vc.y),
                              cv::Scalar(255, 255, 0), 2);
-                    // [cv] line：画线到 canvas（debug）
+                    // [cv] line：画线到 canvas
                     cv::line(canvas, cv::Point((int)vc.x, (int)vc.y - 12),
                              cv::Point((int)vc.x, (int)vc.y + 12),
                              cv::Scalar(255, 255, 0), 2);
@@ -850,7 +850,7 @@ private:
                     bool pred_ok = false;
                     if (has_last_ && has_vel_ && lost_frames_ < hold_frames_) {
                         double pdt = stamp - v_prev_stamp_;
-                        // [cv] norm：距离/长度 → ，配对/去重/锁定
+                        // [cv] norm：距离/长度 → 
                         if (pdt > 0.0 && pdt < 0.5 && cv::norm(vel_) <= hold_max_speed_) {
                             cv::Vec3d pp = v_prev_pos_ + vel_ * pdt;
                             geometry_msgs::TransformStamped ts;
@@ -867,7 +867,7 @@ private:
                             ts.transform.rotation.z = q.z();
                             ts.transform.rotation.w = q.w();
                             tf_broadcaster_.sendTransform(ts);
-                            // [cv] putText：文字到 canvas（debug）
+                            // [cv] putText：文字到 canvas
                             cv::putText(canvas, "PRED", cv::Point(70, 64),
                                         cv::FONT_HERSHEY_SIMPLEX, 0.7,
                                         cv::Scalar(0, 200, 255), 2);
@@ -981,42 +981,42 @@ inline void colorSegment(const cv::Mat& bgr, cv::Mat& res,
 
     cv::Mat hsv;
     cv::Mat mask_r1, mask_r2, mask_r, mask_b, mask_g, mask_all;
-    // [cv] cvtColor：bgr → hsv（HSV/灰度），供颜色或亮度处理
+    // [cv] cvtColor：bgr → hsv（HSV/灰度）；下游：inRange 取颜色掩膜
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
 
-    // [cv] inRange：hsv 上取阈值 → mask_r1（0/255 掩膜），供形态学/轮廓
+    // [cv] inRange：hsv 上取阈值 → mask_r1（0/255 掩膜）
     cv::inRange(hsv, lo_r, hi_r, mask_r1);
-    // [cv] inRange：hsv 上取阈值 → mask_r2（0/255 掩膜），供形态学/轮廓
+    // [cv] inRange：hsv 上取阈值 → mask_r2（0/255 掩膜）
     cv::inRange(hsv, cv::Scalar(170, sv_min, sv_min), cv::Scalar(179, 255, 255), mask_r2);
-    // [cv] bitwise_or：合并掩膜 → mask_r，得到候选颜色区域
+    // [cv] bitwise_or：合并掩膜 → mask_r
     cv::bitwise_or(mask_r1, mask_r2, mask_r);
 
-    // [cv] inRange：hsv 上取阈值 → mask_b（0/255 掩膜），供形态学/轮廓
+    // [cv] inRange：hsv 上取阈值 → mask_b（0/255 掩膜）
     cv::inRange(hsv, lo_b, hi_b, mask_b);
-    // [cv] inRange：hsv 上取阈值 → mask_g（0/255 掩膜），供形态学/轮廓
+    // [cv] inRange：hsv 上取阈值 → mask_g（0/255 掩膜）
     cv::inRange(hsv, lo_g, hi_g, mask_g);
 
     // 黄色/橙色（H 10~40 可调）
     cv::Mat mask_y;
-    // [cv] inRange：hsv 上取阈值 → （0/255 掩膜），供形态学/轮廓
+    // [cv] inRange：hsv 上取阈值 → （0/255 掩膜）
     cv::inRange(hsv, cv::Scalar(y_h_min, y_s_min, y_v_min),
                      cv::Scalar(y_h_max, 255, 255), mask_y);
 
-    // [cv] bitwise_or：合并掩膜 → mask_all，得到候选颜色区域
+    // [cv] bitwise_or：合并掩膜 → mask_all
     cv::bitwise_or(mask_r, mask_b, mask_all);
-    // [cv] bitwise_or：合并掩膜 → mask_all，得到候选颜色区域
+    // [cv] bitwise_or：合并掩膜 → mask_all
     cv::bitwise_or(mask_all, mask_g, mask_all);
-    // [cv] bitwise_or：合并掩膜 → mask_all，得到候选颜色区域
+    // [cv] bitwise_or：合并掩膜 → mask_all
     cv::bitwise_or(mask_all, mask_y, mask_all);
 
     // C1：3x3 + MORPH_OPEN
-    // [cv] getStructuringElement：构造形态学核，供膨胀/开运算
+    // [cv] getStructuringElement：构造形态学核
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
                                                cv::Size(morph_size, morph_size));
     // [cv] morphologyEx：mask_all → cv::MORPH_OPEN，去噪/连通断裂
     cv::morphologyEx(mask_all, mask_all, cv::MORPH_OPEN, kernel);
 
-    // [cv] bitwise_and：掩膜相交 → res，只保留有效像素
+    // [cv] bitwise_and：掩膜相交 → res
     cv::bitwise_and(bgr, bgr, res, mask_all);
 }
 
