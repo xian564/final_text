@@ -128,3 +128,17 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
   输出 `/ft/detection_nn`（`ft_msgs/Detections`）和 `/ft/debug/image_nn`，
   跟踪节点通过 remap 订阅 NN 结果。
 - 相邻帧锁定：多目标时选与上一帧中心最近的一块（`lock_gate_px`），避免左右板来回跳。
+
+## 丢帧匀速外推（v3）
+
+- 最近两次成功位姿估速度：`v = (t_k - t_{k-1}) / dt`（用平滑后的 tvec）。
+- 漏检/遮挡时，若 `lost_frames < hold_frames`（默认 8）且速度 ≤ `hold_max_speed`（默认 8 m/s），
+  按 `p = t_last + v * (now - t_last)` 发布预测 TF，画面标 `PRED`。
+- 连续丢失超过 `hold_frames` 后清空状态，等待重新捕获。
+- 只外推 TF，不伪造 `/ft/detection`（避免污染检测精度统计）。
+
+## 共面过滤（共识平面）
+
+- 灯条数 ≥3 时，枚举所有灯条对定直线，取**内点最多**的那条作为装甲平面。
+- 离平面距离 > `灯条长度 × plane_dist_ratio`（默认 1.0）的灯条判为反光剔除。
+- 至少保留 2 根才生效。
