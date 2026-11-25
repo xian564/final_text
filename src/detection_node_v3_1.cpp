@@ -58,14 +58,14 @@ public:
         pnh_.param("min_dist_x",  min_dist_x_, 15.0);
         pnh_.param("max_dist_x",  max_dist_x_, 500.0);
         pnh_.param("max_angle_diff", max_angle_diff_, 10.0);
-        pnh_.param("ratio_s_max", ratio_s_max_, 1.3);
-        pnh_.param("ratio_l_max", ratio_l_max_, 2.5);
+        pnh_.param("ratio_s_max", ratio_s_max_, 3.0);
+        pnh_.param("ratio_l_max", ratio_l_max_, 5.0);
         pnh_.param("ratio_min",   ratio_min_, 0.4);
-        // 装甲板本体尺寸（米），按考核文档：大 235×127mm，小 120×125mm
-        pnh_.param("armor_large_w", armor_large_w_, 0.235);
-        pnh_.param("armor_large_h", armor_large_h_, 0.127);
-        pnh_.param("armor_small_w", armor_small_w_, 0.120);
-        pnh_.param("armor_small_h", armor_small_h_, 0.125);
+        // 灯条尺寸（米），定义一：大 230×60mm，小 135×60mm
+        pnh_.param("armor_large_w", armor_large_w_, 0.230);
+        pnh_.param("armor_large_h", armor_large_h_, 0.060);
+        pnh_.param("armor_small_w", armor_small_w_, 0.135);
+        pnh_.param("armor_small_h", armor_small_h_, 0.060);
         pnh_.param("max_z",       max_z_, 8.0);
         pnh_.param("deadzone_px", deadzone_px_, 5.0);
         pnh_.param("uniqueness_dt", uniqueness_dt_, 0.15);
@@ -77,6 +77,8 @@ public:
         pnh_.param("roi_y_ratio",  roi_y_ratio_, 0.0);   // 先关闭 ROI
         pnh_.param("bar_v_min",    bar_v_min_, 160);
         pnh_.param("bar_keep_n",   bar_keep_n_, 6);
+        pnh_.param("plane_filter", plane_filter_, true);
+        pnh_.param("plane_dist_ratio", plane_dist_ratio_, 1.0);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
@@ -424,6 +426,34 @@ private:
                           });
 
                 // =======================================================
+                // ---- 共面过滤：最多灯条共识定平面，离面超过灯条长度的当反光 ----
+                if (plane_filter_ && bars.size() >= 3) {
+                    int best_cnt = 0;
+                    std::vector<int> best_keep;
+                    for (size_t i = 0; i < bars.size(); ++i) {
+                        for (size_t j = i + 1; j < bars.size(); ++j) {
+                            cv::Point2f A = bars[i].center, B = bars[j].center;
+                            cv::Point2f dir = B - A;
+                            double dl = cv::norm(dir);
+                            if (dl < 1.0) continue;
+                            cv::Point2f n(-dir.y / dl, dir.x / dl);
+                            double thr = std::max(bars[i].long_h, bars[j].long_h) * plane_dist_ratio_;
+                            std::vector<int> keep;
+                            for (size_t k = 0; k < bars.size(); ++k) {
+                                double d = std::abs((bars[k].center.x - A.x) * n.x +
+                                                    (bars[k].center.y - A.y) * n.y);
+                                if (d <= thr) keep.push_back((int)k);
+                            }
+                            if ((int)keep.size() > best_cnt) { best_cnt = (int)keep.size(); best_keep = keep; }
+                        }
+                    }
+                    if (best_cnt >= 2 && best_cnt < (int)bars.size()) {
+                        std::vector<Bar> kept;
+                        for (size_t k = 0; k < best_keep.size(); ++k) kept.push_back(bars[best_keep[k]]);
+                        bars.swap(kept);
+                    }
+                }
+
                 // 2. 配对 + 几何修正 + 幽灵剔除
                 // =======================================================
                 std::vector<Target> targets;
@@ -834,6 +864,8 @@ private:
     double roi_y_ratio_;
     int yellow_h_min_, yellow_h_max_, yellow_s_min_, yellow_v_min_;
     int bar_v_min_, bar_keep_n_;
+    bool plane_filter_;
+    double plane_dist_ratio_;
     double guard_y_ratio_, dyn_v_offset_, pair_y_ratio_;
     double fcs_four_span_, fcs_four_tol_;
     int blue_h_min_, blue_h_max_, blue_s_min_, blue_v_min_;
