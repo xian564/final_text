@@ -32,18 +32,12 @@ Visualization Manager:
       Enabled: true
       Frame Timeout: 15
       Frames:
-        All Enabled: false
-        armor_v3:
-          Enabled: true
-        base_link:
-          Enabled: true
-        odom:
-          Enabled: true
+        All Enabled: true
       Marker Scale: 1
       Name: TF
-      Show Arrows: false
+      Show Arrows: true
       Show Axes: true
-      Show Names: false
+      Show Names: true
       Tree:
         {}
       Update Interval: 0
@@ -58,7 +52,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: odom
+    Fixed Frame: camera2_optical_frame
     Frame Rate: 30
   Name: root
   Tools:
