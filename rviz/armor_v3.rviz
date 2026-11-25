@@ -35,10 +35,14 @@ Visualization Manager:
         All Enabled: false
         armor_v3:
           Enabled: true
+        base_link:
+          Enabled: true
+        odom:
+          Enabled: true
       Marker Scale: 1
       Name: TF
       Show Arrows: false
-      Show Axes: false
+      Show Axes: true
       Show Names: false
       Tree:
         {}
