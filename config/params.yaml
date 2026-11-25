@@ -72,3 +72,6 @@ bar_h_ratio_min: 0.6
 pair_dy_ratio: 0.4
 quad_align_min: 0.6
 quad_diag_tol: 0.35
+
+hold_frames: 8
+hold_max_speed: 8.0

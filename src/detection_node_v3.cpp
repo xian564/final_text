@@ -122,6 +122,8 @@ public:
         pnh_.param("teleport_margin", teleport_margin_, 20.0);
         pnh_.param("plane_filter", plane_filter_, true);      // 共面过滤（排除反光）
         pnh_.param("plane_dist_ratio", plane_dist_ratio_, 1.0); // 阈值 = 灯条长度 * ratio
+        pnh_.param("hold_frames", hold_frames_, 8);             // 丢帧匀速外推最大帧数
+        pnh_.param("hold_max_speed", hold_max_speed_, 8.0);      // 外推最大速度 m/s
 
         info_sub_ = nh_.subscribe(
             info_topic_, sub_queue_,
@@ -361,6 +363,8 @@ private:
         pnh_.getParam("teleport_margin", teleport_margin_);
         pnh_.getParam("plane_filter", plane_filter_);
         pnh_.getParam("plane_dist_ratio", plane_dist_ratio_);
+        pnh_.getParam("hold_frames", hold_frames_);
+        pnh_.getParam("hold_max_speed", hold_max_speed_);
     }
 
     // ---------- 图像回调 ----------
@@ -575,41 +579,33 @@ private:
                               return a.center.x < b.center.x;
                           });
 
-                // ---- 灯条级共面过滤：最亮两根定平面，离面超过灯条长度的当反光 ----
+                // ---- 灯条级共面过滤：最多灯条共识定平面，离面超过灯条长度的当反光 ----
                 if (plane_filter_ && bars.size() >= 3) {
-                    int a = 0;
-                    for (size_t k = 1; k < bars.size(); ++k)
-                        if (bars[k].v > bars[a].v) a = (int)k;
-                    int b = -1;
-                    double bestv = -1.0;
-                    for (size_t k = 0; k < bars.size(); ++k) {
-                        if ((int)k == a) continue;
-                        double dx = std::abs(bars[k].center.x - bars[a].center.x);
-                        if (dx < min_dist_x_ || dx > max_dist_x_) continue;
-                        if (std::abs(bars[k].center.y - bars[a].center.y) >
-                            1.2 * std::max(bars[a].long_h, bars[k].long_h)) continue;
-                        if (bars[k].v > bestv) { bestv = bars[k].v; b = (int)k; }
-                    }
-                    if (b >= 0) {
-                        cv::Point2f A = bars[a].center, B = bars[b].center;
-                        cv::Point2f dir = B - A;
-                        double dl = cv::norm(dir);
-                        if (dl > 1.0) {
+                    int best_cnt = 0;
+                    std::vector<int> best_keep;
+                    for (size_t i = 0; i < bars.size(); ++i) {
+                        for (size_t j = i + 1; j < bars.size(); ++j) {
+                            cv::Point2f A = bars[i].center, B = bars[j].center;
+                            cv::Point2f dir = B - A;
+                            double dl = cv::norm(dir);
+                            if (dl < 1.0) continue;
                             cv::Point2f n(-dir.y / dl, dir.x / dl);
-                            double thr = std::max(bars[a].long_h, bars[b].long_h) *
-                                         plane_dist_ratio_;
-                            std::vector<Bar> kept;
+                            double thr = std::max(bars[i].long_h, bars[j].long_h) * plane_dist_ratio_;
+                            std::vector<int> keep;
                             for (size_t k = 0; k < bars.size(); ++k) {
                                 double d = std::abs((bars[k].center.x - A.x) * n.x +
                                                     (bars[k].center.y - A.y) * n.y);
-                                if (d <= thr) kept.push_back(bars[k]);
+                                if (d <= thr) keep.push_back((int)k);
                             }
-                            if (kept.size() >= 2 && kept.size() < bars.size()) {
-                                ROS_INFO_THROTTLE(1.0, "[Plane] 灯条反光剔除 %d 根",
-                                                  (int)(bars.size() - kept.size()));
-                                bars.swap(kept);
-                            }
+                            if ((int)keep.size() > best_cnt) { best_cnt = (int)keep.size(); best_keep = keep; }
                         }
+                    }
+                    if (best_cnt >= 2 && best_cnt < (int)bars.size()) {
+                        std::vector<Bar> kept;
+                        for (size_t k = 0; k < best_keep.size(); ++k) kept.push_back(bars[best_keep[k]]);
+                        ROS_INFO_THROTTLE(1.0, "[Plane] 共识平面 %d 根，剔除反光 %d 根",
+                                          best_cnt, (int)(bars.size() - kept.size()));
+                        bars.swap(kept);
                     }
                 }
 
@@ -1001,6 +997,17 @@ private:
                         }
 
 
+                        // ---- 匀速直线模型：用最近两次成功位姿估速度 ----
+                        if (has_vsample_ && stamp > v_prev_stamp_ + 1e-4) {
+                            double vdt = stamp - v_prev_stamp_;
+                            cv::Vec3d nv = (avg_t - v_prev_pos_) * (1.0 / vdt);
+                            if (cv::norm(nv) <= max_speed_) { vel_ = nv; has_vel_ = true; }
+                            else has_vel_ = false;
+                        }
+                        v_prev_pos_ = avg_t;
+                        v_prev_stamp_ = stamp;
+                        has_vsample_ = true;
+
                         last_stamp_ = stamp;
                         last_center2d_ = mt.center2d;
                         last_is_large_ = mt.is_large;
@@ -1261,9 +1268,39 @@ private:
                     }
 
                     if (!fcs_ok) {
+                        // ---- 丢帧匀速外推：最近两帧速度直线外推，维持轨迹 ----
+                        bool pred_ok = false;
+                        if (prev_had_target_ && has_last_ && has_vel_ &&
+                            lost_frames_ < hold_frames_) {
+                            double pdt = stamp - v_prev_stamp_;
+                            if (pdt > 0.0 && pdt < 0.5) {
+                                cv::Vec3d pp = v_prev_pos_ + vel_ * pdt;
+                                if (cv::norm(vel_) <= hold_max_speed_) {
+                                    geometry_msgs::TransformStamped ts;
+                                    ts.header.stamp = msg->header.stamp;
+                                    ts.header.frame_id = camera_frame_;
+                                    ts.child_frame_id = tf_child_;
+                                    ts.transform.translation.x = pp[0];
+                                    ts.transform.translation.y = pp[1];
+                                    ts.transform.translation.z = pp[2];
+                                    tf2::Quaternion q;
+                                    q.setRPY(0.0, 0.0, last_yaw_);
+                                    ts.transform.rotation.x = q.x();
+                                    ts.transform.rotation.y = q.y();
+                                    ts.transform.rotation.z = q.z();
+                                    ts.transform.rotation.w = q.w();
+                                    tf_broadcaster_.sendTransform(ts);
+                                    cv::putText(canvas, "PRED", cv::Point(70, 64),
+                                                cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                                                cv::Scalar(0, 200, 255), 2);
+                                    pred_ok = true;
+                                }
+                            }
+                        }
                         ++lost_frames_;
-                        ROS_INFO_THROTTLE(1.0, "[Hold] 丢帧 %d/5", lost_frames_);
-                        if (lost_frames_ >= 5) {
+                        ROS_INFO_THROTTLE(0.5, pred_ok ? "[Hold] 匀速外推 %d/%d" : "[Hold] 丢帧 %d/%d",
+                                          lost_frames_, hold_frames_);
+                        if (lost_frames_ >= std::max(hold_frames_, 5)) {
                             has_last_ = false; has_sent_ = false;
                             prev_had_target_ = false;   // 防止 FCS 用旧特征幽灵锁
                             pos_queue_.clear(); yaw_queue_.clear();
@@ -1317,6 +1354,11 @@ private:
     int sub_queue_, pub_queue_, min_area_;
     bool plane_filter_;
     double plane_dist_ratio_;
+    int    hold_frames_;
+    double hold_max_speed_;
+    bool   has_vsample_ = false, has_vel_ = false;
+    cv::Vec3d v_prev_pos_{0, 0, 0}, vel_{0, 0, 0};
+    double v_prev_stamp_ = 0.0;
     double fcs_min_area_, dedup_px_, teleport_margin_;
     double max_z_, deadzone_px_, uniqueness_dt_, max_speed_;
     int morph_size_;
