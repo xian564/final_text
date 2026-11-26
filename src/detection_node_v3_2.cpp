@@ -1020,6 +1020,7 @@ private:
                     // [flow] best：选中索引（相邻帧中心锁定优先）→ mt
                     int best = 0;
                     bool locked = false;
+                    bool lock_hold = false;
 
                     // ---- 20 帧锁定：优先保持上一帧选中的目标 ----
                     if (lock_left_ > 0) {
@@ -1063,6 +1064,7 @@ private:
                                 switch_cnt_ = 0;
                             }
                             if (lock_miss_ > 7) { lock_left_ = 0; lock_miss_ = 0; }
+                            else { lock_hold = true; }   // 锁定等待：本帧不切车、不输出
                         }
                     }
                     if (prev_had_target_) {
@@ -1083,6 +1085,11 @@ private:
                                 best = static_cast<int>(k);
                     }
 
+                    if (lock_hold) {
+                        if (has_last_locked_) { targets.assign(1, last_locked_); best = 0; locked = true; }
+                        else lock_hold = false;   // 没有历史才退回兜底
+                    }
+
                     // ---- 整车中心聚合 ----
                     cv::Point2f vc(0, 0);
                     for (size_t k = 0; k < targets.size(); ++k) vc += targets[k].center2d;
@@ -1096,7 +1103,9 @@ private:
                     lock_pred_ = lock_center_ + (lock_center_ - lock_prev_);
                     lock_ratio_ = mt.ratio;
                     if (mt.has_pose) { lock_t_ = mt.t; has_lock_t_ = true; }
+                    last_locked_ = mt; has_last_locked_ = true;
                     lock_miss_ = 0; switch_cnt_ = 0;
+
                     if (mt.has_pose) {
                         // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
                         bool z_outlier = false;
@@ -1671,6 +1680,8 @@ private:
     int         lock_miss_ = 0;
     cv::Point2f switch_center_ = cv::Point2f(0,0);
     int         switch_cnt_ = 0;
+    Target      last_locked_;
+    bool        has_last_locked_ = false;
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     double lock_ratio_ = 0.0;
     bool assist_mode_ = false;
