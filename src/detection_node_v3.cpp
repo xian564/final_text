@@ -126,6 +126,9 @@ public:
         pnh_.param("lock_frames", lock_frames_, 20);
         pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
         pnh_.param("lock_ratio_tol", lock_ratio_tol_, 0.1);   // 长宽比相似容差(±10%)
+        pnh_.param("veh_match_px", veh_match_px_, 88.0);        // 灯条关联位移(px)
+        pnh_.param("veh_hold_frames", veh_hold_frames_, 7);     // 断帧保持帧数
+        pnh_.param("veh_overlap_ratio", veh_overlap_ratio_, 0.5);
         pnh_.param("hold_max_speed", hold_max_speed_, 8.0);      // 外推最大速度 m/s
 
         info_sub_ = nh_.subscribe(
@@ -408,6 +411,134 @@ private:
     //     vel_/v_prev_pos_ → 丢帧预测 TF
     // ============================================================
 
+    // ---------- 车辆级跟踪：灯条 88px 关联 + 50% 重叠合并 + 7 帧保持 ----------
+    struct Veh {
+        int id = 0;
+        std::vector<cv::Point2f> centers;   // 本帧灯条中心
+        cv::Rect2f box;
+        int last_frame = -1000;
+        int hits = 0;
+    };
+    std::vector<Veh> vehicles_;
+    int frame_idx_ = 0, next_veh_id_ = 1, sel_veh_id_ = -1;
+    double veh_match_px_ = 88.0, veh_overlap_ratio_ = 0.5;
+    int veh_hold_frames_ = 7, veh_hist_frames_ = 100;
+
+    static double iou(const cv::Rect2f& a, const cv::Rect2f& b) {
+        float x1 = std::max(a.x, b.x), y1 = std::max(a.y, b.y);
+        float x2 = std::min(a.x + a.width, b.x + b.width);
+        float y2 = std::min(a.y + a.height, b.y + b.height);
+        if (x2 <= x1 || y2 <= y1) return 0.0;
+        double inter = (x2 - x1) * (y2 - y1);
+        return inter / (a.area() + b.area() - inter + 1e-6);
+    }
+
+    void updateVehicles(const std::vector<Bar>& bars, int W, int H, cv::Mat& canvas) {
+        ++frame_idx_;
+        // 1) 每根灯条找最近的旧车灯条（<88px）
+        std::vector<int> bar_veh(bars.size(), -1);
+        std::vector<std::vector<int> > veh_bars(vehicles_.size());
+        for (size_t b = 0; b < bars.size(); ++b) {
+            double best = 1e18; int vj = -1;
+            for (size_t v = 0; v < vehicles_.size(); ++v) {
+                for (size_t c = 0; c < vehicles_[v].centers.size(); ++c) {
+                    double d = cv::norm(bars[b].center - vehicles_[v].centers[c]);
+                    if (d < best && d <= veh_match_px_) { best = d; vj = (int)v; }
+                }
+            }
+            bar_veh[b] = vj;
+            if (vj >= 0) veh_bars[vj].push_back((int)b);
+        }
+        // 2) 命中 >=2 根灯条的车更新
+        for (size_t v = 0; v < vehicles_.size(); ++v) {
+            if ((int)veh_bars[v].size() >= 2) {
+                vehicles_[v].centers.clear();
+                float minx = W, miny = H, maxx = 0, maxy = 0;
+                for (size_t k = 0; k < veh_bars[v].size(); ++k) {
+                    int idx = veh_bars[v][k];
+                    vehicles_[v].centers.push_back(bars[idx].center);
+                    minx = std::min(minx, bars[idx].center.x);
+                    miny = std::min(miny, bars[idx].center.y);
+                    maxx = std::max(maxx, bars[idx].center.x);
+                    maxy = std::max(maxy, bars[idx].center.y);
+                }
+                vehicles_[v].box = cv::Rect2f(minx - 12, miny - 12,
+                                              maxx - minx + 24, maxy - miny + 24);
+                vehicles_[v].last_frame = frame_idx_;
+                vehicles_[v].hits++;
+            }
+        }
+        // 3) 未匹配灯条聚成新车
+        std::vector<bool> used(bars.size(), false);
+        for (size_t b = 0; b < bars.size(); ++b) {
+            if (bar_veh[b] >= 0 || used[b]) continue;
+            Veh nv; nv.id = next_veh_id_++;
+            nv.centers.push_back(bars[b].center);
+            used[b] = true;
+            for (size_t b2 = b + 1; b2 < bars.size(); ++b2) {
+                if (bar_veh[b2] >= 0 || used[b2]) continue;
+                if (cv::norm(bars[b2].center - bars[b].center) <= veh_match_px_ * 2) {
+                    nv.centers.push_back(bars[b2].center); used[b2] = true;
+                }
+            }
+            if (nv.centers.size() >= 2) {
+                float minx = W, miny = H, maxx = 0, maxy = 0;
+                for (size_t k = 0; k < nv.centers.size(); ++k) {
+                    minx = std::min(minx, nv.centers[k].x); maxx = std::max(maxx, nv.centers[k].x);
+                    miny = std::min(miny, nv.centers[k].y); maxy = std::max(maxy, nv.centers[k].y);
+                }
+                nv.box = cv::Rect2f(minx - 12, miny - 12, maxx - minx + 24, maxy - miny + 24);
+                nv.last_frame = frame_idx_; nv.hits = 1;
+                vehicles_.push_back(nv);
+            }
+        }
+        // 4) 重叠 >50% 合并（保留老 id）
+        for (size_t a = 0; a < vehicles_.size(); ++a) {
+            for (size_t b = a + 1; b < vehicles_.size();) {
+                if (iou(vehicles_[a].box, vehicles_[b].box) > veh_overlap_ratio_) {
+                    if (vehicles_[b].id < vehicles_[a].id) std::swap(vehicles_[a], vehicles_[b]);
+                    vehicles_[a].centers.insert(vehicles_[a].centers.end(),
+                                                vehicles_[b].centers.begin(), vehicles_[b].centers.end());
+                    vehicles_[a].box |= vehicles_[b].box;
+                    vehicles_[a].last_frame = std::max(vehicles_[a].last_frame, vehicles_[b].last_frame);
+                    vehicles_.erase(vehicles_.begin() + b);
+                } else ++b;
+            }
+        }
+        // 5) 超 100 帧清掉
+        for (size_t v = 0; v < vehicles_.size();) {
+            if (frame_idx_ - vehicles_[v].last_frame > veh_hist_frames_)
+                vehicles_.erase(vehicles_.begin() + v);
+            else ++v;
+        }
+        // 6) 选择：断帧 <7 帧继续选这个 id；否则选灯条最多的
+        bool keep = false;
+        if (sel_veh_id_ >= 0) {
+            for (size_t v = 0; v < vehicles_.size(); ++v)
+                if (vehicles_[v].id == sel_veh_id_ &&
+                    frame_idx_ - vehicles_[v].last_frame <= veh_hold_frames_) keep = true;
+        }
+        if (!keep) {
+            int best = -1, bestn = 1;
+            for (size_t v = 0; v < vehicles_.size(); ++v)
+                if ((int)vehicles_[v].centers.size() > bestn) { bestn = (int)vehicles_[v].centers.size(); best = (int)v; }
+            sel_veh_id_ = (best >= 0) ? vehicles_[best].id : -1;
+        }
+        // 7) 画车框 + ID
+        for (size_t v = 0; v < vehicles_.size(); ++v) {
+            if (frame_idx_ - vehicles_[v].last_frame > veh_hold_frames_) continue;
+            bool sel = (vehicles_[v].id == sel_veh_id_);
+            cv::rectangle(canvas, vehicles_[v].box,
+                          sel ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 200, 255),
+                          sel ? 3 : 2);
+            cv::putText(canvas, "CAR ID:" + std::to_string(vehicles_[v].id),
+                        cv::Point((int)vehicles_[v].box.x,
+                                  std::max(0, (int)vehicles_[v].box.y - 8)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                        sel ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 200, 255), 2);
+        }
+    }
+
     void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
         if (!is_ready_.load()) return;
 
@@ -682,6 +813,9 @@ private:
                 }
 
                 // =======================================================
+                // 1.5 车辆级跟踪：灯条关联成车、给 id
+                updateVehicles(bars, width_, height_, canvas);
+
                 // 2. 配对 + 几何修正 + 幽灵剔除
                 // =======================================================
                 // [flow] targets：候选目标 → best → mt → PnP/平滑/TF

@@ -78,3 +78,7 @@ lock_frames: 20          # 相邻帧锁定同一目标的帧数
 lock_gate_px: 50         # 相邻帧位移门限(px)
 lock_ratio_tol: 0.1      # 长宽比相似容差(±10%)
 hold_max_speed: 8.0
+
+veh_match_px: 88         # 车辆灯条关联位移(px)
+veh_hold_frames: 7       # 车辆断帧保持帧数
+veh_overlap_ratio: 0.5   # 车辆框重叠合并阈值
