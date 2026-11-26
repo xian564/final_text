@@ -70,9 +70,10 @@ public:
             is_tracking_ = false;
             return;
         }
-        if (gap > lost_time_thresh_) {    // 彻底丢失
-            is_tracking_ = false;
-            ROS_WARN_THROTTLE(1.0, "[tracker] 目标丢失 %.2fs，重置跟踪", gap);
+        if (gap > lost_time_thresh_) {    // 超过 0.5s：发最后一帧 tracking=false，删除轨迹
+            publishTrack(now, false);     // 明确告诉下游“跟踪已失效”
+            is_tracking_ = false;         // 删除轨迹，下一帧检测重新捕获
+            ROS_WARN_THROTTLE(1.0, "[tracker] 目标丢失 %.2fs，删除轨迹并重新捕获", gap);
             return;
         }
         if (gap > watchdog_period_ &&
