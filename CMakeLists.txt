@@ -11,11 +11,8 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   dynamic_reconfigure
   image_transport
-  rosbag
   roscpp
   rospy
-  rqt_gui
-  rviz
   std_msgs
   sensor_msgs
   tf2
@@ -127,7 +124,7 @@ generate_dynamic_reconfigure_options(
 catkin_package(
    INCLUDE_DIRS include
    # LIBRARIES final_text
-   CATKIN_DEPENDS cv_bridge dynamic_reconfigure image_transport rosbag roscpp rospy rqt_gui rviz std_msgs tf2
+   CATKIN_DEPENDS cv_bridge dynamic_reconfigure image_transport roscpp rospy std_msgs sensor_msgs geometry_msgs tf2 tf2_ros ft_msgs
    DEPENDS OpenCV
 )
 

@@ -1,4 +1,4 @@
-# 视觉参数示例：rosrun final_text detect_node_v4 --ros-args ... 或 rosparam load
+# v4 示例参数（未在 launch 中加载；主链路用 params.yaml）
 hsv_sv_min: 100
 yellow_s_min: 100
 yellow_v_min: 100

@@ -1,6 +1,6 @@
 # final_text 视觉功能块包
 
-纯传统 OpenCV / ROS1 Noetic，无深度学习依赖。
+默认识别链路为传统 OpenCV / ROS1 Noetic；神经网络（onnx）为可选对照分支，不作为默认依赖。
 
 ## 功能块
 
