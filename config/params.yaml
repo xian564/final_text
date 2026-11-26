@@ -74,4 +74,5 @@ quad_align_min: 0.6
 quad_diag_tol: 0.35
 
 hold_frames: 8
+lock_frames: 20          # 相邻帧锁定同一目标的帧数
 hold_max_speed: 8.0
