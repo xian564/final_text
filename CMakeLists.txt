@@ -292,3 +292,8 @@ target_link_libraries(detect_node_nn
 
 catkin_install_python(PROGRAMS scripts/nn_detector_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
+
+add_executable(detect_node_v3_2 src/detection_node_v3_2.cpp)
+add_dependencies(detect_node_v3_2 ${PROJECT_NAME}_gencfg)
+target_link_libraries(detect_node_v3_2 ${catkin_LIBRARIES} ${OpenCV_LIBS})

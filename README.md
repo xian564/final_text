@@ -50,25 +50,17 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 ## 共面过滤（反光剔除）
 
 - 开关：`plane_filter`（默认 true）、阈值比例 `plane_dist_ratio`（默认 1.0）。
-- 灯条级：以最亮且可配对的第二根灯条确定“装甲平面”，离该平面垂直距离超过
+- 灯条级：枚举灯条对定直线，取内点最多的一条作为“装甲平面”，离该平面垂直距离超过
   `灯条长度 × plane_dist_ratio` 的灯条判为反光并剔除，然后才进入配对。
 - 目标级：主装甲板确定平面后，其它候选目标中心到该平面距离超过灯条长度的也剔除。
 
 ## PnP 测距标定（pnp_scale）
 
-- 参数：`pnp_scale`（YAML，默认 **1.0**），按比例缩放 PnP 物体点；用灯条尺寸建模后无需再压。
-- 标定方法：用 `red_4_with_detection.bag` 的真值 `/ft/detection` 对比，扫
-  0.55 / 0.57 / 0.58 / 0.60 / 0.627 / 0.65 / 0.70：
-  - 0.57 时输出 z 均值 3.27m，与真值 3.27m 一致；
-  - 3D 误差 0.194m、z 误差 0.175m，为最优；
-  - 0.55 误差 0.271m，0.627 误差 0.402m。
-- 说明：该系数吸收“物体点尺寸/四点取法”与真值的系统偏差。
-- **注意：换镜头或改装甲板尺寸后，`pnp_scale` 需要重新扫一遍。**
-- 重新标定步骤：
-  1. 回放带真值的 bag（如 `red_4_with_detection.bag` 同类数据）；
-  2. 节点输出重映射：`rosrun final_text detect_node_v3 _detection_topic:=/ft/detection_mine _pnp_scale:=X`；
-  3. 与真值 `/ft/detection` 按时间戳对比，扫 `0.50 ~ 0.70`，取 3D/z 误差最小；
-  4. 把最优值写入 `config/params.yaml` 的 `pnp_scale`。
+- 参数：`pnp_scale`（YAML，默认 **1.0**），按比例缩放 PnP 物体点；用灯条尺寸建模后为 1.0。
+- 标定只允许用**物理实测**：卷尺量相机到装甲板的真实距离，测 3~5 个距离点，
+  调 `pnp_scale` 使输出 z 与卷尺读数一致（误差 <5% 即可）。
+- **禁止读取任何真值话题/bag**（如 `*_with_detection.bag`、`/ft/detection` 真值）做标定或调参。
+- 换镜头或改装甲板尺寸后，用同样的实测方法重新标定。
 
 ## v3 识别流程（简版）
 
@@ -78,22 +70,15 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 4. **轮廓 → 灯条**：面积、长宽比、框内平均亮度过滤，矩质心定中心，角度归一化。
 5. **清洗**：断笔合并（共线短灯条拼接）+ 共面过滤（离装甲平面超过灯条长度的判为反光）。
 6. **配对**：间距、高度差、角度差 + 透视修正比例 `dx/cosθ`，按比例区分大/小装甲板。
-7. **四点与 PnP**：左灯条左边缘、右灯条右边缘的上下角点构成旋转四点，按板体长宽比拉高；`solvePnP`（IPPE→ITERATIVE），物体尺寸乘 `pnp_scale`（默认 0.57），并做 `z∈(0.3,15)` 过滤。
+7. **四点与 PnP**：左灯条左边缘、右灯条右边缘的上下角点构成旋转四点，按板体长宽比拉高；`solvePnP`（IPPE→ITERATIVE），物体尺寸乘 `pnp_scale`（默认 1.0），并做 `z∈(0.3,15)` 过滤。
 8. **输出**：`/ft/detection`（`ft_msgs/Detections` 数组，含 `id/is_red/is_large_armor/pose`，position=tvec、orientation=rvec 四元数）；主目标平滑后发 TF；debug 图画旋转框、角点和 `projectPoints` 三轴。
 
-## 阈值调优（真值评估）
+## 阈值调优
 
-用 `red_4_with_detection.bag` 真值 `/ft/detection` 评估“precision = 匹配真值帧 / 有输出帧”：
-
-| 配置 | 有输出帧 | FP | precision | 平均误差 |
-|---|---|---|---|---|
-| 原默认（min_area=20, bar_v_min=160） | 475 | 24 | 94.9% | 0.072m |
-| bar_v_min=180 | 357 | 14 | 96.1% | 0.076m |
-| min_area=50 | 336 | 2 | 99.4% | 0.062m |
-| min_area=40 + bar_v_min=170 | 373 | 2 | 99.5% | 0.067m |
-| **当前默认（40/170）** | 498 | 7 | **98.6%** | 0.056m |
-
-说明：调整“过滤条件先后顺序”不改变结果（条件之间是逻辑与），只会影响速度；真正降低误判的是阈值。当前默认取 `min_area=40`、`bar_v_min=170`。
+- 只用普通 bag / 实车画面目测调参，不读真值。
+- 关键阈值：`min_area`（默认 40）、`bar_v_min`（默认 170）、`ratio_s_max`（3.0）、
+  `ratio_l_max`（5.0）、`bar_h_ratio_min`（0.6）、`pair_dy_ratio`（0.4）。
+- 调参原则：先保证真灯条不被亮度/面积误杀，再用几何否决压误判。
 
 ## 几何否决（剔除斜四边形/假配对）
 
@@ -104,8 +89,7 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
    `<= quad_diag_tol`（默认 0.35）。
 
 作用：灯条高度差过大、上下错位、被拉成平行四边形/斜长条的“假装甲”不再进入 PnP。
-真值评估（red_4_with_detection）：**FP 0，precision 100%**，z 均值 2.91m（真值 3.06m），
-平均误差 0.062m。
+现场目测验证：斜四边形、上下错位、高度差过大的假配对明显减少。
 
 > 阈值越严误判越低，但远距离/半遮挡会更多漏检。若现场发现漏检，优先把 `bar_h_ratio_min` 调到 0.45、`pair_dy_ratio` 调到 0.6；要更严就反过来。
 
@@ -148,3 +132,15 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
 
 > v3.1 调整：去掉“共识平面”过滤，改为丢帧恒速外推（最近两帧 tvec 估速，
 > `p = t_last + v·dt` 发预测 TF，最多 `hold_frames=8` 帧，速度上限 `hold_max_speed=8 m/s`）。
+
+## v3_2 车辆几何推断
+
+- 在 v3 基础上增加：装甲位姿 + 安装偏移 → 车体中心，发布 TF `car_v3_2`。
+- 解析运动预测：`hc::sampleMotion`（匀速/匀速圆周）→ 车体预测位置 → `hc::project` 画 `PRED-CAR`。
+- 接口：`include/final_text/motion_geometry.hpp`（`MotionParams / sampleMotion / cameraPose / project`）。
+- 启动：
+  ```bash
+  roslaunch final_text test_v3_2.launch
+  ```
+- 参数：`mount_x/mount_y/mount_z/mount_yaw`（装甲到车体偏移）、
+  `pred_v/pred_R/pred_omega/pred_t`、`car_tf_child`（默认 `car_v3_2`）。

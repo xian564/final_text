@@ -1,0 +1,14 @@
+<launch>
+    <param name="use_sim_time" value="true" />
+    <node pkg="final_text" type="detect_node_v3_2" name="vision_node_v3_2" output="screen">
+        <rosparam command="load" file="$(find final_text)/config/params.yaml" />
+        <param name="mount_x" value="0.0" />
+        <param name="mount_y" value="0.0" />
+        <param name="mount_z" value="0.0" />
+        <param name="mount_yaw" value="0.0" />
+        <param name="pred_v" value="0.5" />
+        <param name="pred_R" value="2.0" />
+        <param name="pred_omega" value="0.3" />
+        <param name="pred_t" value="0.2" />
+    </node>
+</launch>
