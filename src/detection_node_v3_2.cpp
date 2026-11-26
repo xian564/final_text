@@ -127,8 +127,6 @@ public:
         pnh_.param("lock_frames", lock_frames_, 20);
         pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
         pnh_.param("lock_ratio_tol", lock_ratio_tol_, 0.1);   // 长宽比相似容差(±10%)
-        pnh_.param("lock_gate_3d", lock_gate_3d_, 1.5);       // 3D 距离二次门限(m)
-        pnh_.param("switch_frames", switch_frames_, 3);       // 连续 N 帧同一新板才允许切换
         pnh_.param("mount_x", mount_x_, 0.0);                   // 装甲->车体 安装偏移(相机系)
         pnh_.param("mount_y", mount_y_, 0.0);
         pnh_.param("mount_z", mount_z_, 0.0);
@@ -1020,7 +1018,6 @@ private:
                     // [flow] best：选中索引（相邻帧中心锁定优先）→ mt
                     int best = 0;
                     bool locked = false;
-                    bool lock_hold = false;
 
                     // ---- 20 帧锁定：优先保持上一帧选中的目标 ----
                     if (lock_left_ > 0) {
@@ -1028,44 +1025,11 @@ private:
                         for (size_t k = 0; k < targets.size(); ++k) {
                             if (lock_ratio_ > 1e-3 &&
                                 std::abs(targets[k].ratio - lock_ratio_) > lock_ratio_tol_ * lock_ratio_) continue;
-                            // 2D：对准预测中心
-                            double d = cv::norm(targets[k].center2d - lock_pred_);
-                            if (d > 250.0) continue;
-                            // 3D：tvec 距离二次门限
-                            if (has_lock_t_ && targets[k].has_pose) {
-                                cv::Vec3d dt = targets[k].t - lock_t_;
-                                if (cv::norm(dt) > lock_gate_3d_) continue;
-                            }
+                            double d = cv::norm(targets[k].center2d - lock_center_);
                             if (d < bestd) { bestd = d; cand = (int)k; }
                         }
-                        if (cand >= 0) { best = cand; locked = true; lock_miss_ = 0; switch_cnt_ = 0; }
-                        else {
-                            ++lock_miss_;
-                            // 连续 N 帧都是同一块新板，才允许切换
-                            int alt = -1; double alt_d = 1e18;
-                            for (size_t k = 0; k < targets.size(); ++k) {
-                                if (lock_ratio_ > 1e-3 &&
-                                    std::abs(targets[k].ratio - lock_ratio_) > lock_ratio_tol_ * lock_ratio_) continue;
-                                double d = cv::norm(targets[k].center2d - lock_pred_);
-                                if (d < alt_d) { alt_d = d; alt = (int)k; }
-                            }
-                            if (alt >= 0) {
-                                if (switch_cnt_ > 0 &&
-                                    cv::norm(targets[alt].center2d - switch_center_) < 80.0) {
-                                    ++switch_cnt_;
-                                } else {
-                                    switch_center_ = targets[alt].center2d;
-                                    switch_cnt_ = 1;
-                                }
-                                if (switch_cnt_ >= switch_frames_) {
-                                    lock_left_ = 0; lock_miss_ = 0; switch_cnt_ = 0;
-                                }
-                            } else {
-                                switch_cnt_ = 0;
-                            }
-                            if (lock_miss_ > 7) { lock_left_ = 0; lock_miss_ = 0; }
-                            else { lock_hold = true; }   // 锁定等待：本帧不切车、不输出
-                        }
+                        if (cand >= 0 && bestd < 150.0) { best = cand; locked = true; }
+                        else { lock_left_ = 0; }
                     }
                     if (prev_had_target_) {
                         double bestd = 1e18;
@@ -1080,30 +1044,9 @@ private:
                         if (cand >= 0) { best = cand; locked = true; }
                     }
                     if (!locked) {
-                        // 降低兜底优先级：同一块“最正对”板连续 3 帧才允许切换
-                        int fb = 0;
                         for (size_t k = 1; k < targets.size(); ++k)
-                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[fb].avg_tilt))
-                                fb = static_cast<int>(k);
-                        if (fallback_cnt_ > 0 &&
-                            cv::norm(targets[fb].center2d - fallback_center_) < 80.0) {
-                            ++fallback_cnt_;
-                        } else {
-                            fallback_center_ = targets[fb].center2d;
-                            fallback_cnt_ = 1;
-                        }
-                        if (fallback_cnt_ >= 3) {
-                            best = fb; locked = true;
-                        } else if (has_last_locked_) {
-                            targets.assign(1, last_locked_); best = 0; locked = true;  // 先保持，不切
-                        } else {
-                            best = fb;
-                        }
-                    }
-
-                    if (lock_hold) {
-                        if (has_last_locked_) { targets.assign(1, last_locked_); best = 0; locked = true; }
-                        else lock_hold = false;   // 没有历史才退回兜底
+                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
+                                best = static_cast<int>(k);
                     }
 
                     // ---- 整车中心聚合 ----
@@ -1114,14 +1057,8 @@ private:
                     // ---- 主目标平滑 + 下坠补偿 + TF ----
                     Target& mt = targets[best];
                     if (lock_left_ > 0) --lock_left_; else lock_left_ = lock_frames_;
-                    lock_prev_ = lock_center_;
                     lock_center_ = mt.center2d;
-                    lock_pred_ = lock_center_ + (lock_center_ - lock_prev_);
                     lock_ratio_ = mt.ratio;
-                    if (mt.has_pose) { lock_t_ = mt.t; has_lock_t_ = true; }
-                    last_locked_ = mt; has_last_locked_ = true;
-                    lock_miss_ = 0; switch_cnt_ = 0;
-
                     if (mt.has_pose) {
                         // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
                         bool z_outlier = false;
@@ -1687,19 +1624,6 @@ private:
     int lock_frames_ = 20, lock_left_ = 0;
     double lock_gate_px_ = 50.0;
     double lock_ratio_tol_ = 0.1;
-    double lock_gate_3d_ = 1.5;
-    int    switch_frames_ = 3;
-    cv::Point2f lock_prev_ = cv::Point2f(0,0);
-    cv::Point2f lock_pred_ = cv::Point2f(0,0);
-    cv::Vec3d   lock_t_{0,0,0};
-    bool        has_lock_t_ = false;
-    int         lock_miss_ = 0;
-    cv::Point2f switch_center_ = cv::Point2f(0,0);
-    int         switch_cnt_ = 0;
-    Target      last_locked_;
-    bool        has_last_locked_ = false;
-    int         fallback_cnt_ = 0;
-    cv::Point2f fallback_center_ = cv::Point2f(0,0);
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     double lock_ratio_ = 0.0;
     bool assist_mode_ = false;
