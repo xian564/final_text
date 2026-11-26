@@ -1021,9 +1021,11 @@ private:
                         for (size_t k = 0; k < targets.size(); ++k) {
                             // [cv] norm：距离/长度 → d
                             double d = cv::norm(targets[k].center2d - prev_center2d_);
+                            if (d > 100.0) continue;   // 相邻帧位移不超过 100px
+                            if (prev_ratio_ > 1e-3 && std::abs(targets[k].ratio - prev_ratio_) > 0.3 * prev_ratio_) continue;  // 长宽比相似
                             if (d < bestd) { bestd = d; cand = (int)k; }
                         }
-                        if (cand >= 0 && bestd < 300.0) { best = cand; locked = true; }
+                        if (cand >= 0) { best = cand; locked = true; }
                     }
                     if (!locked) {
                         for (size_t k = 1; k < targets.size(); ++k)
@@ -1265,6 +1267,7 @@ private:
                         cv::Rect mr(bx1, by1, std::max(1, bx2 - bx1), std::max(1, by2 - by1));
                         prev_had_target_ = true;
                         prev_id_ = mt.id;
+                        prev_ratio_ = mt.ratio;
                         prev_is_large_ = mt.is_large;
                         prev_center2d_ = mt.center2d;
                         prev_stamp_ = stamp;
@@ -1610,6 +1613,7 @@ private:
     cv::Point2f prev_center2d_ = cv::Point2f(0, 0);
     double      prev_stamp_ = 0.0;
     double      prev_aspect_ = 2.0;
+    double      prev_ratio_ = 0.0;   // 上一帧选中板 ratio
     double      prev_grad_ = 0.0;
     double      prev_bar_ratio_ = 5.0;
     double      prev_four_[4] = {0, 0, 0, 0};
