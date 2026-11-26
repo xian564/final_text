@@ -1,5 +1,6 @@
 <launch>
     <param name="use_sim_time" value="true" />
+    <arg name="open_rqt" default="true" />
 
     <node pkg="final_text" type="detect_node_v3" name="vision_node_v3" output="screen" respawn="true">
         <rosparam command="load" file="$(find final_text)/config/params.yaml" />
@@ -16,4 +17,15 @@
     <node pkg="rviz" type="rviz" name="rviz" args="-d $(find final_text)/rviz/armor_v3.rviz">
         <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
     </node>
+
+    <!-- 一行 launch 同时打开两个 rqt -->
+    <group if="$(arg open_rqt)">
+        <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_image_view"
+              args="/ft/debug/image" output="screen">
+            <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
+        </node>
+        <node pkg="rqt_reconfigure" type="rqt_reconfigure" name="rqt_reconfigure" output="screen">
+            <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
+        </node>
+    </group>
 </launch>

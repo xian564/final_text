@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ROS: build (docker)",
+      "type": "shell",
+      "command": "docker exec myubuntu2004 bash -lc 'source /opt/ros/noetic/setup.bash && cd /root/catkin_ws && catkin_make'",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: launch v3 (rviz + 2 rqt)",
+      "type": "shell",
+      "command": "docker exec -e DISPLAY=:0 myubuntu2004 bash -lc 'source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && roslaunch final_text test_v3.launch'",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: launch v3 (no rqt)",
+      "type": "shell",
+      "command": "docker exec -e DISPLAY=:0 myubuntu2004 bash -lc 'source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && roslaunch final_text test_v3.launch open_rqt:=false'",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: launch v3_2 (rviz + 2 rqt)",
+      "type": "shell",
+      "command": "docker exec -e DISPLAY=:0 myubuntu2004 bash -lc 'source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && roslaunch final_text test_v3_2.launch'",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: stop all",
+      "type": "shell",
+      "command": "docker exec myubuntu2004 bash -lc 'rosnode list 2>/dev/null | xargs -r rosnode kill; pkill -x rviz; pkill -x rqt_image_view; pkill -x rqt_reconfigure; pkill -f rosmaster'",
+      "problemMatcher": []
+    }
+  ]
+}
