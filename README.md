@@ -144,3 +144,56 @@ X 红、Y 绿、Z 蓝（BGR 顺序），画在识别框旁；目标倾斜时坐�
   ```
 - 参数：`mount_x/mount_y/mount_z/mount_yaw`（装甲到车体偏移）、
   `pred_v/pred_R/pred_omega/pred_t`、`car_tf_child`（默认 `car_v3_2`）。
+
+## 环境与构建
+
+```bash
+# ROS Noetic + OpenCV 4.2
+cd ~/catkin_ws
+catkin_make
+source devel/setup.bash
+```
+
+## 运行
+
+```bash
+# 仿真/回放 bag
+rosbag play <bag> --clock -l
+
+# v3（完整版）：RViz + rqt_image_view + rqt_reconfigure 一键打开
+roslaunch final_text test_v3.launch
+
+# v3_2（车辆几何推断）
+roslaunch final_text test_v3_2.launch
+
+# v3.1（作业精简版，可选 NN 分支）
+rosrun final_text detect_node_v3_1 _nn_enable:=true _nn_model_path:=/path/armor_allfp32.onnx
+```
+
+## 消息接口
+
+- `/ft/detection`：`ft_msgs/Detections`
+  - `header.frame_id`：相机光学系
+  - `detections[i].id`：帧内编号
+  - `is_red` / `is_large_armor`
+  - `pose.position = tvec`（相机系，米）
+  - `pose.orientation = rvec 四元数`
+- `/ft/track`：`ft_msgs/Track`
+  - `id`、`tracking`、`position`、`velocity`、`position_predict`
+- TF：`camera_frame -> armor_v3`；v3_2 额外 `car_v3_2`
+
+## 工况与鲁棒性
+
+| 工况 | 处理 |
+|---|---|
+| 静止/匀速 | 20 帧锁定 + 匀速外推 |
+| 近距离 | 近战重分割（低 S/V） |
+| 地面反光 | 底部高光守卫 + 共面过滤 |
+| 遮挡/漏检 | FCS 残影补位 + 丢帧外推 |
+
+## 已知限制
+
+- 编号（1–5）传统链路不识别；NN 模型可输出编号；
+- 旋转/绕行预测只有匀速直线外推；
+- C++ ONNX 后端受 OpenCV DNN 限制，当前 NN 由 ORT Python 节点运行；
+- 单文件行数较大（v3），如需可拆分。
