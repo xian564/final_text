@@ -124,7 +124,8 @@ public:
         pnh_.param("plane_filter", plane_filter_, true);      // 共面过滤（排除反光）
         pnh_.param("plane_dist_ratio", plane_dist_ratio_, 1.0); // 阈值 = 灯条长度 * ratio
         pnh_.param("hold_frames", hold_frames_, 8);
-        pnh_.param("lock_frames", lock_frames_, 20);   // 相邻帧锁定同一目标的帧数
+        pnh_.param("lock_frames", lock_frames_, 20);
+        pnh_.param("lock_gate_px", lock_gate_px_, 50.0);   // 相邻帧位移门限(px)
         pnh_.param("mount_x", mount_x_, 0.0);                   // 装甲->车体 安装偏移(相机系)
         pnh_.param("mount_y", mount_y_, 0.0);
         pnh_.param("mount_z", mount_z_, 0.0);
@@ -1035,7 +1036,7 @@ private:
                         for (size_t k = 0; k < targets.size(); ++k) {
                             // [cv] norm：距离/长度 → d
                             double d = cv::norm(targets[k].center2d - prev_center2d_);
-                            if (d > 100.0) continue;   // 相邻帧位移不超过 100px
+                            if (d > lock_gate_px_) continue;   // 相邻帧位移不超过 lock_gate_px_
                             if (prev_ratio_ > 1e-3 && std::abs(targets[k].ratio - prev_ratio_) > 0.3 * prev_ratio_) continue;  // 长宽比相似
                             if (d < bestd) { bestd = d; cand = (int)k; }
                         }
@@ -1620,6 +1621,7 @@ private:
     double omega_deg_s_ = 0.0;
     int lost_frames_ = 0;
     int lock_frames_ = 20, lock_left_ = 0;
+    double lock_gate_px_ = 50.0;
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     double lock_ratio_ = 0.0;
     bool assist_mode_ = false;
