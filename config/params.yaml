@@ -77,5 +77,7 @@ hold_frames: 8
 lock_frames: 20          # 相邻帧锁定同一目标的帧数
 lock_gate_px: 50         # 相邻帧位移门限(px)
 lock_ratio_tol: 0.1      # 长宽比相似容差(±10%)
+lock_gate_3d: 1.5        # 3D 距离二次门限(m)
+switch_frames: 3         # 连续N帧同一新板才允许切换
 hold_max_speed: 8.0
 
