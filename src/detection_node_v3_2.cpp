@@ -1080,9 +1080,25 @@ private:
                         if (cand >= 0) { best = cand; locked = true; }
                     }
                     if (!locked) {
+                        // 降低兜底优先级：同一块“最正对”板连续 3 帧才允许切换
+                        int fb = 0;
                         for (size_t k = 1; k < targets.size(); ++k)
-                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
-                                best = static_cast<int>(k);
+                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[fb].avg_tilt))
+                                fb = static_cast<int>(k);
+                        if (fallback_cnt_ > 0 &&
+                            cv::norm(targets[fb].center2d - fallback_center_) < 80.0) {
+                            ++fallback_cnt_;
+                        } else {
+                            fallback_center_ = targets[fb].center2d;
+                            fallback_cnt_ = 1;
+                        }
+                        if (fallback_cnt_ >= 3) {
+                            best = fb; locked = true;
+                        } else if (has_last_locked_) {
+                            targets.assign(1, last_locked_); best = 0; locked = true;  // 先保持，不切
+                        } else {
+                            best = fb;
+                        }
                     }
 
                     if (lock_hold) {
@@ -1682,6 +1698,8 @@ private:
     int         switch_cnt_ = 0;
     Target      last_locked_;
     bool        has_last_locked_ = false;
+    int         fallback_cnt_ = 0;
+    cv::Point2f fallback_center_ = cv::Point2f(0,0);
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     double lock_ratio_ = 0.0;
     bool assist_mode_ = false;
