@@ -1017,11 +1017,16 @@ private:
                         for (size_t k = 0; k < targets.size(); ++k) {
                             if (lock_ratio_ > 1e-3 &&
                                 std::abs(targets[k].ratio - lock_ratio_) > lock_ratio_tol_ * lock_ratio_) continue;
-                            double d = cv::norm(targets[k].center2d - lock_center_);
+                            // 对准“预测中心”，避免两车之间来回跳
+                            double d = cv::norm(targets[k].center2d - lock_pred_);
                             if (d < bestd) { bestd = d; cand = (int)k; }
                         }
-                        if (cand >= 0 && bestd < 150.0) { best = cand; locked = true; }
-                        else { lock_left_ = 0; }
+                        if (cand >= 0 && bestd < 250.0) {
+                            best = cand; locked = true; lock_miss_ = 0;
+                        } else {
+                            ++lock_miss_;
+                            if (lock_miss_ > 7) { lock_left_ = 0; lock_miss_ = 0; }  // 连续 7 帧找不到才解锁
+                        }
                     }
                     if (prev_had_target_) {
                         double bestd = 1e18;
@@ -1049,8 +1054,11 @@ private:
                     // ---- 主目标平滑 + 下坠补偿 + TF ----
                     Target& mt = targets[best];
                     if (lock_left_ > 0) --lock_left_; else lock_left_ = lock_frames_;
+                    lock_prev_ = lock_center_;
                     lock_center_ = mt.center2d;
+                    lock_pred_ = lock_center_ + (lock_center_ - lock_prev_);  // 匀速预测下一帧
                     lock_ratio_ = mt.ratio;
+                    lock_miss_ = 0;
                     if (mt.has_pose) {
                         // 离群 z 拒绝：与中值差 > 1.5m 的目标不进 TF
                         bool z_outlier = false;
@@ -1552,6 +1560,9 @@ private:
     double lock_gate_px_ = 50.0;
     double lock_ratio_tol_ = 0.1;
     cv::Point2f lock_center_ = cv::Point2f(0,0);
+    cv::Point2f lock_prev_ = cv::Point2f(0,0);
+    cv::Point2f lock_pred_ = cv::Point2f(0,0);
+    int lock_miss_ = 0;
     double lock_ratio_ = 0.0;
     bool assist_mode_ = false;
     int  assist_left_ = 0;
