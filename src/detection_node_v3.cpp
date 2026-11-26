@@ -528,9 +528,7 @@ private:
         for (size_t v = 0; v < vehicles_.size(); ++v) {
             if (frame_idx_ - vehicles_[v].last_frame > veh_hold_frames_) continue;
             bool sel = (vehicles_[v].id == sel_veh_id_);
-            cv::rectangle(canvas, vehicles_[v].box,
-                          sel ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 200, 255),
-                          sel ? 3 : 2);
+            // 按需求：车辆这一段只标 ID，不画框
             cv::putText(canvas, "CAR ID:" + std::to_string(vehicles_[v].id),
                         cv::Point((int)vehicles_[v].box.x,
                                   std::max(0, (int)vehicles_[v].box.y - 8)),
