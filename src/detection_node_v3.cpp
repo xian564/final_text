@@ -690,7 +690,9 @@ private:
                         double dx = bars[j].center.x - bars[i].center.x;
                         // 补丁1：绝对距离拦截（>250 或 <15 一律不配对）
                         if (dx > max_dist_x_ || dx <= min_dist_x_) continue;
-                        if (std::abs(bars[i].center.y - bars[j].center.y) > 50) continue;
+                        // 粗错位：以两根中较长灯条的一半长度为门限（自适应距离/尺度）
+                        double pair_dy_px = 0.5 * std::max(bars[i].long_h, bars[j].long_h);
+                        if (std::abs(bars[i].center.y - bars[j].center.y) > pair_dy_px) continue;
 
                         double ddeg = std::abs(bars[i].tilt - bars[j].tilt)
                                       * 180.0 / CV_PI;
