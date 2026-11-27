@@ -197,3 +197,28 @@ rosrun final_text detect_node_v3_1 _nn_enable:=true _nn_model_path:=/path/armor_
 - 旋转/绕行预测只有匀速直线外推；
 - C++ ONNX 后端受 OpenCV DNN 限制，当前 NN 由 ORT Python 节点运行；
 - 单文件行数较大（v3），如需可拆分。
+
+## 提交版本说明
+
+- **正稿**：`src/detection_node_v3_1.cpp` + `src/ft_tracker_node.cpp`
+  - 启动：`roslaunch final_text test_v3_1.launch`
+- **附加题/实验**：`bonus/`
+  - `detection_node_v3.cpp`：完整功能版（FCS/几何否决/共面/锁定/外推）
+  - `detection_node_v3_2.cpp`：车体几何推断
+  - `detection_node_v3_split.cpp`：Knee& 分块重构
+  - `detection_node_v4.cpp`：早期骨架
+- 所有版本共用 `config/params.yaml` 与 `config/tracker.yaml`。
+
+## 跟踪滤波与关联（补充说明）
+
+- 滤波：`cv::KalmanFilter`，状态 `[x,y,z,vx,vy,vz]`，观测 `[x,y,z]`。
+- 参数（`config/tracker.yaml`）：
+  - `q_pos=0.1`（位置过程噪声）、`q_vel=0.5`（速度过程噪声）、`r_pos=0.05`（观测噪声）；
+  - 位置噪声取小、速度噪声取大：允许速度更快变化，位置更信任观测。
+- 提前量：`T=0.1s`，`position_predict = position + velocity * T`，并限幅 `predict_cap_m=0.6m`。
+- 关联门限：`assoc_gate=0.5m`（PDF 建议 0.3–0.5）。
+  - 取 0.5 的理由：帧率 20–30Hz、目标速度 <6m/s，单帧位移约 0.2–0.3m；
+  - 0.5 可覆盖正常位移，又能避免把另一块装甲板/另一辆车关联进来；
+  - 早期 0.8 太松，换板时容易误关联，已收紧。
+- 丢检：watchdog 每 50ms `predict`，发 `tracking=false`；连续丢失 >0.5s 发最后一帧 false 后删除轨迹，重新捕获。
+- 时间戳：检测/跟踪消息都用**输入图像时间戳**；纯预测沿用最近一帧图像时间戳，不用 `ros::Time::now()`。
