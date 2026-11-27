@@ -15,3 +15,5 @@ marker_queue: 1
 
 vmax_mps: 6.0          # 速度上限
 predict_cap_m: 0.6     # 预测偏移上限
+
+max_dt_s: 0.5          # dt 异常重捕门限

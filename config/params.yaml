@@ -95,3 +95,8 @@ z_min: 0.3
 z_max: 15.0
 fcs_gate_px: 400.0
 fcs_grad_tol: 45.0
+
+time_window_s: 0.5     # 时间窗：瞬移/外推
+
+teleport_scale: 1.5
+min_speed_z: 0.5

@@ -20,6 +20,7 @@ public:
         nh_.param<double>("T", predict_T_, 0.1);
         nh_.param<double>("vmax_mps", vmax_mps_, 6.0);
         nh_.param<double>("predict_cap_m", predict_cap_m_, 0.6);
+        nh_.param<double>("max_dt_s", max_dt_s_, 0.5);
         nh_.param<double>("q_pos", q_pos_, 0.1);
         nh_.param<double>("q_vel", q_vel_, 0.5);
         nh_.param<double>("r_pos", r_pos_, 0.05);
@@ -128,7 +129,7 @@ private:
         }
 
         double dt = (stamp - last_det_time_).toSec();
-        if (dt <= 0.0 || dt > 0.5) {   // dt 异常，重新捕获
+        if (dt <= 0.0 || dt > max_dt_s_) {   // dt 异常，重新捕获
             is_tracking_ = false;
             return;
         }
@@ -149,7 +150,7 @@ private:
     // 纯预测：不 correct，只 predict + 发布 tracking=false
     void predictOnly(ros::Time now) {
         double dt = (now - last_step_time_).toSec();
-        if (dt <= 0.0 || dt > 0.5) dt = watchdog_period_;
+        if (dt <= 0.0 || dt > max_dt_s_) dt = watchdog_period_;
         setDt(dt);
         kf_.predict();
         clampVelocity();
@@ -257,6 +258,7 @@ private:
     double predict_T_;
     double vmax_mps_ = 6.0;
     double predict_cap_m_ = 0.6;
+    double max_dt_s_ = 0.5;
     double q_pos_, q_vel_, r_pos_;
     double lost_time_thresh_, watchdog_period_;
 };

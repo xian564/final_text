@@ -83,6 +83,11 @@ public:
         pnh_.param("hold_max_speed", hold_max_speed_, 8.0);
         pnh_.param("guard_y_ratio", guard_y_ratio_, 0.85);
         pnh_.param("dyn_v_offset",  dyn_v_offset_, 50.0);
+        pnh_.param("dyn_v_min", dyn_v_min_, 180.0);
+        pnh_.param("z_min", z_min_, 0.3);
+        pnh_.param("z_max", z_max_, 15.0);
+        pnh_.param("teleport_scale", teleport_scale_, 1.5);
+        pnh_.param("min_speed_z", min_speed_z_, 0.5);
         pnh_.param("pair_y_ratio",  pair_y_ratio_, 0.75);
         pnh_.param("fcs_four_span", fcs_four_span_, 30.0);
         pnh_.param("fcs_four_tol",  fcs_four_tol_, 60.0);
@@ -105,6 +110,7 @@ public:
         pnh_.param("pub_queue", pub_queue_, 1);
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
         pnh_.param("min_area", min_area_, 20);
+        pnh_.param("time_window_s", time_window_s_, 0.5);   // 时间窗（瞬移/外推）
         pnh_.param("nn_enable", nn_enable_, false);
         pnh_.param<std::string>("nn_model_path", nn_model_path_, "");
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
@@ -283,6 +289,9 @@ private:
     // dynamic_reconfigure 回调：先写回参数服务器，再立即生效
     void drCallback(final_text::VisionConfig& cfg, uint32_t level) {
         (void)level;
+        pnh_.setParam("dyn_v_min", cfg.dyn_v_min);
+        pnh_.setParam("z_min", cfg.z_min);
+        pnh_.setParam("z_max", cfg.z_max);
         pnh_.setParam("red_h_min", cfg.red_h_min);
         pnh_.setParam("red_h_max", cfg.red_h_max);
         pnh_.setParam("hsv_sv_min", cfg.hsv_sv_min);
@@ -338,7 +347,7 @@ private:
             cv::Mat rvec, tvec;
             bool ok = cv::solvePnP(obj, img, K_, D_, rvec, tvec, false, cv::SOLVEPNP_IPPE);
             if (!ok) ok = cv::solvePnP(obj, img, K_, D_, rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
-            if (!ok || tvec.at<double>(2) <= 0.3 || tvec.at<double>(2) > 15.0) continue;
+            if (!ok || tvec.at<double>(2) <= z_min_ || tvec.at<double>(2) > z_max_) continue;
 
             ft_msgs::Detection d;
             d.header = msg->header;
@@ -433,7 +442,7 @@ private:
             }
 
             // 3) 动态高亮掩膜（解决过曝）
-            double dyn_v_thresh = std::max(180.0, max_v - dyn_v_offset_);
+            double dyn_v_thresh = std::max(dyn_v_min_, max_v - dyn_v_offset_);
             cv::Mat high_mask;
             cv::compare(v_chan, dyn_v_thresh, high_mask, cv::CMP_GT);
 
@@ -649,8 +658,8 @@ private:
                                 // [cv] solvePnP：物体点+四点 → rvec/tvec
                                 ok = cv::solvePnP(obj, tg.corners, K_, D_,
                                                   rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
-                            if (ok && tvec.at<double>(2) > 0.3 &&
-                                tvec.at<double>(2) < 15.0) {
+                            if (ok && tvec.at<double>(2) > z_min_ &&
+                                tvec.at<double>(2) < z_max_) {
                                 tg.has_pose = true;
                                 tg.t = cv::Vec3d(tvec.at<double>(0),
                                                  tvec.at<double>(1),
@@ -775,11 +784,11 @@ private:
                             continue;
                         }
                         if (has_last_ && (stamp - last_stamp_) > 1e-4 &&
-                            (stamp - last_stamp_) < 0.5) {
+                            (stamp - last_stamp_) < time_window_s_) {
                             double dt = stamp - last_stamp_;
                             double fx = K_.at<double>(0, 0);
                             double max_px = fx * max_speed_ * dt /
-                                            std::max(0.5, targets[k].z) * 1.5 + teleport_margin_;
+                                            std::max(min_speed_z_, targets[k].z) * teleport_scale_ + teleport_margin_;
                             // [cv] norm：距离/长度 → d
                             double d = cv::norm(targets[k].center2d - last_center2d_);
                             if (d > max_px) {
@@ -939,7 +948,7 @@ private:
                     if (has_last_ && has_vel_ && lost_frames_ < hold_frames_) {
                         double pdt = stamp - v_prev_stamp_;
                         // [cv] norm：距离/长度 → 
-                        if (pdt > 0.0 && pdt < 0.5 && cv::norm(vel_) <= hold_max_speed_) {
+                        if (pdt > 0.0 && pdt < time_window_s_ && cv::norm(vel_) <= hold_max_speed_) {
                             cv::Vec3d pp = v_prev_pos_ + vel_ * pdt;
                             geometry_msgs::TransformStamped ts;
                             ts.header.stamp = msg->header.stamp;
@@ -1052,6 +1061,9 @@ private:
     bool transport_ready_;
 
     cv::Mat K_, D_;
+    double time_window_s_ = 0.5;
+    double dyn_v_min_ = 180.0, z_min_ = 0.3, z_max_ = 15.0;
+    double teleport_scale_ = 1.5, min_speed_z_ = 0.5;
     bool nn_enable_ = false;
     std::string nn_model_path_;
     std::unique_ptr<IDetector> nn_detector_;

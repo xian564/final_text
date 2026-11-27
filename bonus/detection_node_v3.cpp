@@ -122,6 +122,9 @@ public:
         pnh_.param("pub_queue", pub_queue_, 1);
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
         pnh_.param("min_area", min_area_, 40);
+        pnh_.param("time_window_s", time_window_s_, 0.5);
+        pnh_.param("teleport_scale", teleport_scale_, 1.5);
+        pnh_.param("min_speed_z", min_speed_z_, 0.5);
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
         pnh_.param("dedup_px", dedup_px_, 120.0);
         pnh_.param("teleport_margin", teleport_margin_, 20.0);
@@ -1006,11 +1009,11 @@ private:
                             continue;
                         }
                         if (has_last_ && (stamp - last_stamp_) > 1e-4 &&
-                            (stamp - last_stamp_) < 0.5) {
+                            (stamp - last_stamp_) < time_window_s_) {
                             double dt = stamp - last_stamp_;
                             double fx = K_.at<double>(0, 0);
                             double max_px = fx * max_speed_ * dt /
-                                            std::max(0.5, targets[k].z) * 1.5 + teleport_margin_;
+                                            std::max(min_speed_z_, targets[k].z) * teleport_scale_ + teleport_margin_;
                             // [cv] norm：距离/长度 → d
                             double d = cv::norm(targets[k].center2d - last_center2d_);
                             if (d > max_px) {
@@ -1453,7 +1456,7 @@ private:
                         if (prev_had_target_ && has_last_ && has_vel_ &&
                             lost_frames_ < hold_frames_) {
                             double pdt = stamp - v_prev_stamp_;
-                            if (pdt > 0.0 && pdt < 0.5) {
+                            if (pdt > 0.0 && pdt < time_window_s_) {
                                 cv::Vec3d pp = v_prev_pos_ + vel_ * pdt;
                                 // [cv] norm：距离/长度 → 
                                 if (cv::norm(vel_) <= hold_max_speed_) {
@@ -1615,6 +1618,8 @@ private:
     bool transport_ready_;
 
     cv::Mat K_, D_;
+    double time_window_s_ = 0.5;
+    double teleport_scale_ = 1.5, min_speed_z_ = 0.5;
     int width_ = 0, height_ = 0;
     std::string camera_frame_, distortion_model_;
 };
