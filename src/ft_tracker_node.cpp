@@ -18,6 +18,8 @@ class TrackerNode {
 public:
     TrackerNode() : nh_("~") {
         nh_.param<double>("T", predict_T_, 0.1);
+        nh_.param<double>("vmax_mps", vmax_mps_, 6.0);
+        nh_.param<double>("predict_cap_m", predict_cap_m_, 0.6);
         nh_.param<double>("q_pos", q_pos_, 0.1);
         nh_.param<double>("q_vel", q_vel_, 0.5);
         nh_.param<double>("r_pos", r_pos_, 0.05);
@@ -71,7 +73,7 @@ public:
             return;
         }
         if (gap > lost_time_thresh_) {    // 超过 0.5s：发最后一帧 tracking=false，删除轨迹
-            publishTrack(now, false);     // 明确告诉下游“跟踪已失效”
+            publishTrack(last_image_stamp_, false);  // 用最近一帧图像时间戳
             is_tracking_ = false;         // 删除轨迹，下一帧检测重新捕获
             ROS_WARN_THROTTLE(1.0, "[tracker] 目标丢失 %.2fs，删除轨迹并重新捕获", gap);
             return;
@@ -92,6 +94,7 @@ private:
     void detectionCallback(const ft_msgs::Detections::ConstPtr& msg) {
         if (msg->detections.empty()) return;
         ros::Time stamp = msg->header.stamp;
+        last_image_stamp_ = stamp;
 
         // ---- 多检测关联：已有轨迹时选离预测最近且在门限内的 ----
         int pick = 0;
@@ -109,6 +112,8 @@ private:
             if (pick < 0) return;      // 门限内没有观测，交给看门狗纯预测
         }
         const ft_msgs::Detection& det = msg->detections[pick];
+        if (!std::isfinite(det.pose.position.x) || !std::isfinite(det.pose.position.y) ||
+            !std::isfinite(det.pose.position.z)) return;
 
         if (!is_tracking_) {           // 初始化
             kf_.statePost = (cv::Mat_<float>(6, 1) <<
@@ -150,11 +155,11 @@ private:
         clampVelocity();
         last_step_time_ = now;
         last_pred_time_ = now;
-        publishTrack(now, false);
+        publishTrack(last_image_stamp_, false);
     }
 
     void clampVelocity() {
-        const float vmax = 6.0f;   // 车体物理上限 m/s
+        const float vmax = (float)vmax_mps_;   // 车体物理上限 m/s
         for (int i = 3; i < 6; ++i) {
             float v = kf_.statePost.at<float>(i);
             if (!std::isfinite(v)) v = 0.0f;
@@ -177,7 +182,7 @@ private:
         out.velocity.x = vx; out.velocity.y = vy; out.velocity.z = vz;
         double dx = vx * predict_T_, dy = vy * predict_T_, dz = vz * predict_T_;
         double dn = std::sqrt(dx*dx + dy*dy + dz*dz);
-        if (dn > 0.6) { dx *= 0.6/dn; dy *= 0.6/dn; dz *= 0.6/dn; }  // 预测偏移上限 0.6m
+        if (dn > predict_cap_m_) { dx *= predict_cap_m_/dn; dy *= predict_cap_m_/dn; dz *= predict_cap_m_/dn; }
         out.position_predict.x = x + dx;
         out.position_predict.y = y + dy;
         out.position_predict.z = z + dz;
@@ -247,8 +252,11 @@ private:
     int sub_queue_ = 10, pub_queue_ = 10, marker_queue_ = 1;
     std::string frame_id_ = "hk_camera_ca";
     ros::Time last_det_time_, last_step_time_, last_pred_time_;
+    ros::Time last_image_stamp_;
 
     double predict_T_;
+    double vmax_mps_ = 6.0;
+    double predict_cap_m_ = 0.6;
     double q_pos_, q_vel_, r_pos_;
     double lost_time_thresh_, watchdog_period_;
 };

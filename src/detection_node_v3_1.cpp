@@ -18,6 +18,8 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <dynamic_reconfigure/server.h>
 #include <final_text/VisionConfig.h>
+#include "final_text/detector_interface.hpp"
+#include <memory>
 #include <ft_msgs/Detection.h>
 #include <ft_msgs/Detections.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -103,6 +105,8 @@ public:
         pnh_.param("pub_queue", pub_queue_, 1);
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
         pnh_.param("min_area", min_area_, 20);
+        pnh_.param("nn_enable", nn_enable_, false);
+        pnh_.param<std::string>("nn_model_path", nn_model_path_, "");
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
         pnh_.param("dedup_px", dedup_px_, 120.0);
         pnh_.param("teleport_margin", teleport_margin_, 20.0);
@@ -129,6 +133,11 @@ public:
         dr_server_->setCallback(
             boost::bind(&VisionNodeV3::drCallback, this, _1, _2));
         detection_array_pub_ = nh_.advertise<ft_msgs::Detections>(detection_topic_, pub_queue_);
+        if (nn_enable_ && !nn_model_path_.empty()) {
+            nn_detector_.reset(new OnnxDetector(nn_model_path_, 0.5f, 0.5f, 0.45f));
+            ROS_INFO("NN detector: %s ready=%d", nn_model_path_.c_str(),
+                     nn_detector_ ? (int)nn_detector_->ready() : 0);
+        }
     }
 
     bool isReady() const {
@@ -304,6 +313,73 @@ private:
     }
 
     // ---------- 图像回调 ----------
+    // ---------- 神经网络接口（可选）：IDetector::detect -> PnP -> /ft/detection ----------
+    bool processNN(const cv::Mat& bgr, const sensor_msgs::ImageConstPtr& msg, cv::Mat& canvas) {
+        if (!nn_detector_ || !nn_detector_->ready()) return false;
+        std::vector<ArmorObservation> armors;
+        if (!nn_detector_->detect(bgr, armors) || armors.empty()) return false;
+
+        ft_msgs::Detections arr;
+        arr.header = msg->header;
+        for (size_t k = 0; k < armors.size(); ++k) {
+            const ArmorObservation& a = armors[k];
+            double w = 0.5 * (cv::norm(a.corners[0] - a.corners[1]) +
+                              cv::norm(a.corners[3] - a.corners[2]));
+            double h = 0.5 * (cv::norm(a.corners[0] - a.corners[3]) +
+                              cv::norm(a.corners[1] - a.corners[2]));
+            if (w < 3 || h < 3) continue;
+            bool is_large = (w / std::max(1.0, h) > 3.0);
+            double Wb = (is_large ? armor_large_w_ : armor_small_w_) * 0.5;
+            double Hb = (is_large ? armor_large_h_ : armor_small_h_) * 0.5;
+            std::vector<cv::Point3f> obj = {
+                {(float)-Wb, (float)-Hb, 0}, {(float)Wb, (float)-Hb, 0},
+                {(float)Wb, (float)Hb, 0}, {(float)-Wb, (float)Hb, 0}};
+            std::vector<cv::Point2f> img(a.corners, a.corners + 4);
+            cv::Mat rvec, tvec;
+            bool ok = cv::solvePnP(obj, img, K_, D_, rvec, tvec, false, cv::SOLVEPNP_IPPE);
+            if (!ok) ok = cv::solvePnP(obj, img, K_, D_, rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
+            if (!ok || tvec.at<double>(2) <= 0.3 || tvec.at<double>(2) > 15.0) continue;
+
+            ft_msgs::Detection d;
+            d.header = msg->header;
+            d.id = (int)k + 1;
+            d.is_red = (a.color == 1);
+            d.is_large_armor = is_large;
+            if (!std::isfinite(tvec.at<double>(0)) || !std::isfinite(tvec.at<double>(1)) ||
+                !std::isfinite(tvec.at<double>(2))) continue;
+            d.pose.position.x = tvec.at<double>(0);
+            d.pose.position.y = tvec.at<double>(1);
+            d.pose.position.z = tvec.at<double>(2);
+            cv::Mat R; cv::Rodrigues(rvec, R);
+            tf2::Matrix3x3 m3(R.at<double>(0,0), R.at<double>(0,1), R.at<double>(0,2),
+                              R.at<double>(1,0), R.at<double>(1,1), R.at<double>(1,2),
+                              R.at<double>(2,0), R.at<double>(2,1), R.at<double>(2,2));
+            tf2::Quaternion q; m3.getRotation(q);
+            d.pose.orientation.x = q.x(); d.pose.orientation.y = q.y();
+            d.pose.orientation.z = q.z(); d.pose.orientation.w = q.w();
+            arr.detections.push_back(d);
+
+            std::vector<cv::Point> quad;
+            for (int c = 0; c < 4; ++c) quad.push_back(cv::Point((int)a.corners[c].x, (int)a.corners[c].y));
+            cv::polylines(canvas, quad, true, cv::Scalar(0, 255, 0), 3);
+            cv::putText(canvas, "NN ID:" + std::to_string(d.id),
+                        cv::Point(quad[0].x, std::max(0, quad[0].y - 8)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+
+            geometry_msgs::TransformStamped ts;
+            ts.header = msg->header;
+            ts.header.frame_id = camera_frame_;
+            ts.child_frame_id = tf_child_;
+            ts.transform.translation.x = d.pose.position.x;
+            ts.transform.translation.y = d.pose.position.y;
+            ts.transform.translation.z = d.pose.position.z;
+            ts.transform.rotation = d.pose.orientation;
+            tf_broadcaster_.sendTransform(ts);
+        }
+        if (!arr.detections.empty()) detection_array_pub_.publish(arr);
+        return !arr.detections.empty();
+    }
+
     void imageCallback(const sensor_msgs::ImageConstPtr& msg) {
         if (!is_ready_.load()) return;
 
@@ -314,6 +390,16 @@ private:
             if (img.cols != width_ || img.rows != height_) return;
 
             cv::Mat canvas = img.clone();
+
+            if (nn_enable_) {
+                processNN(img, msg, canvas);
+                cv_bridge::CvImage out_img;
+                out_img.header = msg->header;
+                out_img.encoding = "bgr8";
+                out_img.image = canvas;
+                image_pub_.publish(out_img.toImageMsg());
+                return;
+            }
 
             // 保留原版 debug 绿框（绝对不动）
             // [cv] rectangle：画矩形到 canvas
@@ -597,6 +683,8 @@ private:
 
                         ft_msgs::Detection d;
                         d.header = msg->header;
+                        if (!std::isfinite(tg.t[0]) || !std::isfinite(tg.t[1]) ||
+                            !std::isfinite(tg.t[2])) continue;
                         d.id = tg.id;
                         d.is_large_armor = tg.is_large;
 
@@ -964,6 +1052,9 @@ private:
     bool transport_ready_;
 
     cv::Mat K_, D_;
+    bool nn_enable_ = false;
+    std::string nn_model_path_;
+    std::unique_ptr<IDetector> nn_detector_;
     int width_ = 0, height_ = 0;
     std::string camera_frame_, distortion_model_;
 };

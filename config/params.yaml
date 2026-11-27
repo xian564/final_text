@@ -78,3 +78,20 @@ lock_frames: 20          # 相邻帧锁定同一目标的帧数
 lock_gate_px: 50         # 相邻帧位移门限(px)
 lock_ratio_tol: 0.1      # 长宽比相似容差(±10%)
 hold_max_speed: 8.0
+
+nn_enable: false
+nn_model_path: ""
+
+lock_pred_gate_px: 250   # 锁定预测门限(px)
+white_min_dx: 15
+white_max_dx: 300
+white_max_dy: 60
+white_max_angle: 12
+white_ratio_min: 0.4
+white_ratio_max: 2.5
+
+dyn_v_min: 180.0
+z_min: 0.3
+z_max: 15.0
+fcs_gate_px: 400.0
+fcs_grad_tol: 45.0
