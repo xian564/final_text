@@ -1,20 +1,19 @@
 #pragma once
-// ============================================================
-//  detector_interface.hpp
-//  神经网络检测接口：IDetector / OnnxDetector（OpenCV DNN）
-//  模型协议：输入 1x3x480x640（等比缩放+补边124、RGB/255）
-//            输出 [1,21,6300]：颜色0-3、编号4-12、四角点13-20
-//  角点顺序（模型）：左上、左下、右下、右上
-// ============================================================
+// 神经网络检测接口：IDetector / OnnxDetector（ONNX Runtime C++ 后端）
+// 模型协议：输入 1x3x480x640（等比缩放+补边124、RGB/255）
+// 输出 [1,21,6300]：颜色0-3、编号4-12、四角点13-20
 #include <opencv2/opencv.hpp>
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#include <algorithm>
+#include <array>
+#include <memory>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 struct ArmorObservation {
-    cv::Point2f corners[4];   // TL, TR, BR, BL（已映射回原图）
+    cv::Point2f corners[4];   // TL, TR, BR, BL（原图坐标）
     int   color = 2;          // 0 蓝, 1 红, 2 熄灭
-    int   number = 0;         // 1..9，0 表示未分类
+    int   number = 0;         // 0=未知, 1..8
     float score = 0.f;
 };
 
@@ -34,10 +33,20 @@ class OnnxDetector : public IDetector {
                  float nms_thres = 0.45f)
         : color_thres_(color_thres), number_thres_(number_thres),
           nms_thres_(nms_thres) {
+        if (model_path.empty()) return;
         try {
-            net_ = cv::dnn::readNetFromONNX(model_path);
-            ready_ = !net_.empty();
-        } catch (const cv::Exception& e) {
+            env_.reset(new Ort::Env(ORT_LOGGING_LEVEL_WARNING, "armor_nn"));
+            Ort::SessionOptions opt;
+            opt.SetIntraOpNumThreads(1);
+            session_.reset(new Ort::Session(*env_, model_path.c_str(), opt));
+            Ort::AllocatorWithDefaultOptions alloc;
+            auto in = session_->GetInputNameAllocated(0, alloc);
+            auto out = session_->GetOutputNameAllocated(0, alloc);
+            input_name_ = in.get();
+            output_name_ = out.get();
+            ready_ = true;
+        } catch (const std::exception& e) {
+            fprintf(stderr, "ORT load failed: %s\n", e.what());
             ready_ = false;
         }
     }
@@ -55,74 +64,92 @@ class OnnxDetector : public IDetector {
         int nh = std::max(1, (int)std::round(bgr.rows * scale));
         int pad_x = (IN_W - nw) / 2, pad_y = (IN_H - nh) / 2;
 
-        cv::Mat canvas(IN_H, IN_W, CV_8UC3, cv::Scalar(124, 124, 124));
+        cv::Mat canvas(IN_H, IN_W, CV_8UC3, cv::Scalar(124,124,124));
         cv::resize(bgr, canvas(cv::Rect(pad_x, pad_y, nw, nh)), cv::Size(nw, nh));
 
-        cv::Mat blob;
-        cv::dnn::blobFromImage(canvas, blob, 1.0 / 255.0,
-                               cv::Size(IN_W, IN_H), cv::Scalar(),
-                               true, false);   // swapRB=true, center=false
-        net_.setInput(blob);
-        cv::Mat out = net_.forward();
-        if (out.empty()) return false;
+        std::vector<float> input(3 * IN_H * IN_W, 0.f);
+        const int plane = IN_H * IN_W;
+        for (int y = 0; y < IN_H; ++y) {
+            const cv::Vec3b* row = canvas.ptr<cv::Vec3b>(y);
+            for (int x = 0; x < IN_W; ++x) {
+                // BGR -> RGB, /255, NCHW
+                input[0*plane + y*IN_W + x] = row[x][2] / 255.0f;
+                input[1*plane + y*IN_W + x] = row[x][1] / 255.0f;
+                input[2*plane + y*IN_W + x] = row[x][0] / 255.0f;
+            }
+        }
+        std::array<int64_t,4> in_shape{1,3,IN_H,IN_W};
+        auto mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value tensor = Ort::Value::CreateTensor<float>(
+            mem, input.data(), input.size(), in_shape.data(), in_shape.size());
 
-        // 输出 [1,21,6300] -> 21 x 6300
-        int rows = out.size[1], cols = out.size[2];
-        cv::Mat m = out.reshape(1, rows);
+        const char* in_names[] = { input_name_.c_str() };
+        const char* out_names[] = { output_name_.c_str() };
+        std::vector<Ort::Value> outputs;
+        try {
+            outputs = session_->Run(Ort::RunOptions{nullptr},
+                                    in_names, &tensor, 1, out_names, 1);
+        } catch (const std::exception&) {
+            return false;
+        }
+        if (outputs.empty()) return false;
+        float* out = outputs[0].GetTensorMutableData<float>();
+        auto info = outputs[0].GetTensorTypeAndShapeInfo();
+        auto shape = info.GetShape();
+        if (shape.size() != 3) return false;
+        int rows = (int)shape[1], cols = (int)shape[2];
 
         std::vector<ArmorObservation> cand;
         std::vector<cv::Rect> boxes;
         std::vector<float> scores;
-
         for (int i = 0; i < cols; ++i) {
-            float c0 = m.at<float>(0, i), c1 = m.at<float>(1, i), c2 = m.at<float>(2, i);
+            float c0 = out[0*cols + i], c1 = out[1*cols + i], c2 = out[2*cols + i];
             int color = 0; float cs = c0;
             if (c1 > cs) { color = 1; cs = c1; }
             if (c2 > cs) { color = 2; cs = c2; }
             if (cs < color_thres_) continue;
 
-            int best_n = 0; float ns = m.at<float>(4, i);
+            int best_n = 0; float ns = out[4*cols + i];
             for (int k = 1; k < 9; ++k) {
-                float v = m.at<float>(4 + k, i);
+                float v = out[(4+k)*cols + i];
                 if (v > ns) { ns = v; best_n = k; }
             }
             if (ns < number_thres_) continue;
 
             cv::Point2f p[4];
             for (int k = 0; k < 4; ++k) {
-                float x = m.at<float>(13 + 2 * k, i);
-                float y = m.at<float>(14 + 2 * k, i);
+                float x = out[(13+2*k)*cols + i];
+                float y = out[(14+2*k)*cols + i];
                 p[k] = cv::Point2f((x - pad_x) / scale, (y - pad_y) / scale);
             }
-            // 模型顺序 TL, BL, BR, TR -> PnP 需要 TL, TR, BR, BL
             ArmorObservation a;
-            a.corners[0] = p[0];
-            a.corners[1] = p[3];
-            a.corners[2] = p[2];
-            a.corners[3] = p[1];
+            a.corners[0] = p[0];   // TL
+            a.corners[1] = p[3];   // TR
+            a.corners[2] = p[2];   // BR
+            a.corners[3] = p[1];   // BL
             a.color = color;
-            a.number = best_n;
+            a.number = best_n + 1;
             a.score = cs;
             cand.push_back(a);
 
-            float minx = std::min(std::min(p[0].x, p[1].x), std::min(p[2].x, p[3].x));
-            float maxx = std::max(std::max(p[0].x, p[1].x), std::max(p[2].x, p[3].x));
-            float miny = std::min(std::min(p[0].y, p[1].y), std::min(p[2].y, p[3].y));
-            float maxy = std::max(std::max(p[0].y, p[1].y), std::max(p[2].y, p[3].y));
-            boxes.push_back(cv::Rect((int)minx, (int)miny, (int)(maxx - minx), (int)(maxy - miny)));
+            float minx = std::min(std::min(p[0].x,p[1].x), std::min(p[2].x,p[3].x));
+            float maxx = std::max(std::max(p[0].x,p[1].x), std::max(p[2].x,p[3].x));
+            float miny = std::min(std::min(p[0].y,p[1].y), std::min(p[2].y,p[3].y));
+            float maxy = std::max(std::max(p[0].y,p[1].y), std::max(p[2].y,p[3].y));
+            boxes.push_back(cv::Rect((int)minx, (int)miny, (int)(maxx-minx), (int)(maxy-miny)));
             scores.push_back(cs);
         }
-
         std::vector<int> keep;
         if (!boxes.empty())
             cv::dnn::NMSBoxes(boxes, scores, color_thres_, nms_thres_, keep);
-        for (size_t k = 0; k < keep.size(); ++k)
-            armors.push_back(cand[keep[k]]);
+        for (size_t k = 0; k < keep.size(); ++k) armors.push_back(cand[keep[k]]);
         return !armors.empty();
     }
 
  private:
-    cv::dnn::Net net_;
+    std::unique_ptr<Ort::Env> env_;
+    std::unique_ptr<Ort::Session> session_;
+    std::string input_name_, output_name_;
     bool ready_ = false;
     float color_thres_, number_thres_, nms_thres_;
 };

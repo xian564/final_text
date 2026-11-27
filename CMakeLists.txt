@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(final_text)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -25,7 +27,7 @@ find_package(catkin REQUIRED COMPONENTS
 set(OpenCV_DIR "/usr/lib/x86_64-linux-gnu/cmake/opencv4" CACHE PATH "OpenCV 4.2 (ROS Noetic)" FORCE)
 find_package(OpenCV 4 REQUIRED)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/third_party/ort/include)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -276,7 +278,9 @@ add_executable(detect_node_v3_1 src/detection_node_v3_1.cpp)
 target_link_libraries(detect_node_v3_1
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
+  ${PROJECT_SOURCE_DIR}/third_party/ort/lib/libonnxruntime.so
 )
+set_target_properties(detect_node_v3_1 PROPERTIES BUILD_RPATH ${PROJECT_SOURCE_DIR}/third_party/ort/lib)
 
 
 # ---- 神经网络检测节点 ----
@@ -284,7 +288,9 @@ add_executable(detect_node_nn src/detect_node_nn.cpp)
 target_link_libraries(detect_node_nn
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
+  ${PROJECT_SOURCE_DIR}/third_party/ort/lib/libonnxruntime.so
 )
+set_target_properties(detect_node_nn PROPERTIES BUILD_RPATH ${PROJECT_SOURCE_DIR}/third_party/ort/lib)
 
 
 catkin_install_python(PROGRAMS scripts/nn_detector_node.py

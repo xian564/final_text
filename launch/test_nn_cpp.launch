@@ -1,0 +1,17 @@
+<launch>
+    <param name="use_sim_time" value="true" />
+    <arg name="model_path" default="/root/catkin_ws/bag/armor_allfp32.onnx" />
+
+    <node pkg="final_text" type="detect_node_nn" name="vision_node_nn" output="screen">
+        <param name="model_path" value="$(arg model_path)" />
+    </node>
+
+    <node pkg="final_text" type="ft_tracker_node" name="ft_tracker" output="screen">
+        <remap from="/ft/detection" to="/ft/detection_nn" />
+        <rosparam command="load" file="$(find final_text)/config/tracker.yaml" />
+    </node>
+
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find final_text)/rviz/armor_v3.rviz">
+        <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
+    </node>
+</launch>

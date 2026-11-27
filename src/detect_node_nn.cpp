@@ -22,16 +22,16 @@ class NnNode {
   NnNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
       : nh_(nh), it_(nh), has_prev_(false) {
     std::string model;
-    pnh_.param<std::string>("model_path", model, "");
-    pnh_.param("color_thres", color_thres_, 0.5);
-    pnh_.param("number_thres", number_thres_, 0.5);
-    pnh_.param("nms_thres", nms_thres_, 0.45);
-    pnh_.param("pnp_scale", pnp_scale_, 1.0);
-    pnh_.param("armor_large_w", armor_large_w_, 0.230);
-    pnh_.param("armor_large_h", armor_large_h_, 0.060);
-    pnh_.param("armor_small_w", armor_small_w_, 0.135);
-    pnh_.param("armor_small_h", armor_small_h_, 0.060);
-    pnh_.param("lock_gate_px", lock_gate_px_, 300.0);
+    pnh.param<std::string>("model_path", model, "");
+    pnh.param("color_thres", color_thres_, 0.5);
+    pnh.param("number_thres", number_thres_, 0.5);
+    pnh.param("nms_thres", nms_thres_, 0.45);
+    pnh.param("pnp_scale", pnp_scale_, 1.0);
+    pnh.param("armor_large_w", armor_large_w_, 0.230);
+    pnh.param("armor_large_h", armor_large_h_, 0.060);
+    pnh.param("armor_small_w", armor_small_w_, 0.135);
+    pnh.param("armor_small_h", armor_small_h_, 0.060);
+    pnh.param("lock_gate_px", lock_gate_px_, 300.0);
 
     detector_.reset(new OnnxDetector(model, color_thres_, number_thres_, nms_thres_));
     if (!model.empty() && !detector_->ready())
@@ -66,7 +66,16 @@ class NnNode {
     cv::Mat canvas = bgr.clone();
 
     std::vector<ArmorObservation> armors;
+    static double sum_ms = 0; static int cnt = 0;
+    ros::Time t0 = ros::Time::now();
     detector_->detect(bgr, armors);
+    sum_ms += (ros::Time::now() - t0).toSec() * 1000.0; ++cnt;
+    static double last_log = 0;
+    double now_s = ros::Time::now().toSec();
+    if (now_s - last_log > 1.0 && cnt > 0) {
+        fprintf(stderr, "NN armors=%zu infer_avg=%.1f ms\n", armors.size(), sum_ms / cnt);
+        last_log = now_s; sum_ms = 0; cnt = 0;
+    }
 
     // 相邻帧锁定：选离上一帧选中目标最近的一块
     int pick = -1;
