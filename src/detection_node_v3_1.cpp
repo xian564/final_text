@@ -17,6 +17,7 @@
 #include <image_transport/image_transport.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <dynamic_reconfigure/server.h>
+#include <ros/package.h>
 #include <final_text/VisionConfig.h>
 #include "final_text/detector_interface.hpp"
 #include <memory>
@@ -142,6 +143,7 @@ public:
         dr_server_.reset(new dynamic_reconfigure::Server<final_text::VisionConfig>(pnh_));
         dr_server_->setCallback(
             boost::bind(&VisionNodeV3::drCallback, this, _1, _2));
+        loadDigitTemplates();
         detection_array_pub_ = nh_.advertise<ft_msgs::Detections>(detection_topic_, pub_queue_);
         if (nn_enable_ && !nn_model_path_.empty()) {
             nn_detector_.reset(new OnnxDetector(nn_model_path_, 0.5f, 0.5f, 0.45f));
@@ -326,6 +328,42 @@ private:
     }
 
     // ---------- 图像回调 ----------
+    // ---------- 数字模板识别（传统，可选） ----------
+    std::vector<cv::Mat> digit_templates_;
+    std::vector<int> digit_labels_;
+
+    void loadDigitTemplates() {
+        std::string dir = ros::package::getPath("final_text") + "/models/";
+        for (int i = 1; i <= 5; ++i) {
+            cv::Mat img = cv::imread(dir + "digit_" + std::to_string(i) + ".png",
+                                     cv::IMREAD_GRAYSCALE);
+            if (img.empty()) { ROS_WARN("无法读取模板: digit_%d.png", i); continue; }
+            cv::Mat bin;
+            cv::threshold(img, bin, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+            if (cv::mean(bin)[0] > 127) cv::bitwise_not(bin, bin);
+            cv::resize(bin, bin, cv::Size(20, 30));
+            digit_templates_.push_back(bin);
+            digit_labels_.push_back(i);
+        }
+        ROS_INFO("数字模板加载 %zu 个", digit_templates_.size());
+    }
+
+    int recognizeNumber(const cv::Mat& gray_roi) {
+        if (digit_templates_.empty() || gray_roi.empty()) return 0;
+        cv::Mat bin;
+        cv::threshold(gray_roi, bin, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        if (cv::mean(bin)[0] > 127) cv::bitwise_not(bin, bin);
+        cv::resize(bin, bin, cv::Size(20, 30));
+        double best = -1; int label = 0;
+        for (size_t i = 0; i < digit_templates_.size(); ++i) {
+            cv::Mat res;
+            cv::matchTemplate(bin, digit_templates_[i], res, cv::TM_CCOEFF_NORMED);
+            double score = res.at<float>(0, 0);
+            if (score > best) { best = score; label = digit_labels_[i]; }
+        }
+        return (best > 0.5) ? label : 0;
+    }
+
     // ---------- 神经网络接口（可选）：IDetector::detect -> PnP -> /ft/detection ----------
     bool processNN(const cv::Mat& bgr, const sensor_msgs::ImageConstPtr& msg, cv::Mat& canvas) {
         if (!nn_detector_ || !nn_detector_->ready()) return false;
@@ -700,6 +738,23 @@ private:
                         if (!std::isfinite(tg.t[0]) || !std::isfinite(tg.t[1]) ||
                             !std::isfinite(tg.t[2])) continue;
                         d.id = tg.id;
+                        d.number = 0;
+                        if (!digit_templates_.empty()) {
+                            int bx1 = canvas.cols, by1 = canvas.rows, bx2 = 0, by2 = 0;
+                            for (int c = 0; c < 4; ++c) {
+                                bx1 = std::min(bx1, (int)tg.corners[c].x);
+                                by1 = std::min(by1, (int)tg.corners[c].y);
+                                bx2 = std::max(bx2, (int)tg.corners[c].x);
+                                by2 = std::max(by2, (int)tg.corners[c].y);
+                            }
+                            cv::Rect bb(bx1, by1, std::max(1,bx2-bx1), std::max(1,by2-by1));
+                            bb &= cv::Rect(0, 0, canvas.cols, canvas.rows);
+                            if (bb.width > 5 && bb.height > 5) {
+                                cv::Mat gray;
+                                cv::cvtColor(canvas(bb), gray, cv::COLOR_BGR2GRAY);
+                                d.number = recognizeNumber(gray);
+                            }
+                        }
                         d.is_large_armor = tg.is_large;
 
                         // 颜色判定：取框内红/蓝像素数
