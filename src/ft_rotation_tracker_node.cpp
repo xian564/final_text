@@ -134,8 +134,10 @@ class RotTracker {
     }
 
     // 预测：车体直线 + 旋转相位
-    double cx = has_center_ ? center_.x : x, cz = has_center_ ? center_.y : z;
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
+    // 车体中心先做直线外推，再叠加旋转相位
+    double cx = (has_center_ ? center_.x : x) + vx * T_;
+    double cz = (has_center_ ? center_.y : z) + vz * T_;
     double th = phase + omega_ * T_;
     pred_.x = cx + R_ * std::cos(th);
     pred_.y = y + vy * T_;
@@ -156,7 +158,8 @@ class RotTracker {
       return;
     }
     // 极限推算：车体直线 + 相位继续转
-    double cx = has_center_ ? center_.x : cur_.x, cz = has_center_ ? center_.y : cur_.z;
+    double cx = (has_center_ ? center_.x : cur_.x) + kf_.statePost.at<float>(3) * gap;
+    double cz = (has_center_ ? center_.y : cur_.z) + kf_.statePost.at<float>(5) * gap;
     double th = phase_ + omega_ * gap;
     pred_.x = cx + R_ * std::cos(th);
     pred_.y = cur_.y + kf_.statePost.at<float>(4) * gap;
