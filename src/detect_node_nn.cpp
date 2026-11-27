@@ -131,6 +131,7 @@ class NnNode {
       ft_msgs::Detection d;
       d.header = msg->header;
       d.id = (int)k + 1;
+      d.number = a.number;
       d.is_red = (a.color == 1);
       d.is_large_armor = is_large;
       d.pose.position.x = tvec.at<double>(0);

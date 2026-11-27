@@ -100,7 +100,7 @@ class NnDetector:
             ok, rvec, tvec = cv2.solvePnP(obj, np.array(d['quad'], np.float32), self.K, self.D, flags=cv2.SOLVEPNP_IPPE)
             if not ok or tvec[2] < 0.3 or tvec[2] > 15: continue
             det = Detection(); det.header = msg.header
-            det.id = k+1; det.is_red = (d['color']==1); det.is_large_armor = bool(large)
+            det.id = k+1; det.number = int(d['num']); det.is_red = (d['color']==1); det.is_large_armor = bool(large)
             det.pose.position.x = float(tvec[0]); det.pose.position.y = float(tvec[1]); det.pose.position.z = float(tvec[2])
             R,_ = cv2.Rodrigues(rvec); qq = tft.quaternion_from_matrix(np.vstack([np.hstack([R, tvec]), [0,0,0,1]]))
             det.pose.orientation.x, det.pose.orientation.y, det.pose.orientation.z, det.pose.orientation.w = map(float, qq)

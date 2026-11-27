@@ -72,6 +72,7 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 - `/ft/detection`：`ft_msgs/Detections`
   - `header.stamp` = 图像时间戳，`frame_id` = 相机 frame
   - `detections[i].id`：帧内唯一
+  - `number`（0=未知，1–5；NN 分支输出）
   - `is_red` / `is_large_armor`
   - `pose.position` = tvec（米），`pose.orientation` = rvec 四元数
 - `/ft/track`：`ft_msgs/Track`
@@ -109,7 +110,8 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 
 - 正稿 v3.1 为**核心链路**：不含 FCS 残影、几何否决、共识平面、丢帧外推；这些在 `bonus/detection_node_v3.cpp`。
 - 神经网络：C++ `OnnxDetector` 受 OpenCV DNN 限制，无法加载本模型（FP16 / Conv 输入不支持）；NN 仅以 ORT Python 节点做实验，未接入正稿链路。
-- 不识别装甲板编号（1–5），不估计车体旋转。
+- 传统链路不识别装甲板编号；NN 分支（`number` 字段）可输出 1–5。
+- 不估计车体旋转（旋转模型为进阶项，未实现）。
 
 ## 11. 附加题
 
