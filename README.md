@@ -120,3 +120,15 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 ## 12. AI 使用
 
 见 [`ai_usage.md`](ai_usage.md)。
+
+## 旋转目标建模（进阶，`ft_rotation_tracker_node`）
+
+- 车体中心：对最近 `fit_window` 秒的装甲中心做圆拟合（Kasa），得到中心与半径；不足 8 点沿用上次结果。
+- 相位/角速度：`phase = atan2(z-cz, x-cx)`，0.5s 窗口内差分并低通；正=左转、负=右转。
+- 预测：`pred = body_center + R·[cos(θ+ωT), sin(θ+ωT)]`，y 用直线速度外推。
+- 选择：首次取最靠近相机轴的检测；之后取离预测最近且在 `assoc_gate` 内的检测。
+- 断帧：`lost_time_thresh` 内继续预测，超过则断开 ID 重新捕获；遮挡/丢失 `valid=false`。
+- 车体 ID：订阅 `/ft/body_id`（`std_msgs/Int32`），留作神经网络编号接入。
+- 输出：`/ft/track_rot`（`position` 当前装甲、`position_predict` 预测、`body_center` 车体中心、`valid`）；
+  `/ft/debug/marker_rot` 画车体中心（蓝）、当前装甲（绿）、预测装甲（红）。
+- 启动：`roslaunch final_text test_rotation.launch`

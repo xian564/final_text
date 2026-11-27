@@ -1,0 +1,12 @@
+# 旋转跟踪（ft_rotation_tracker_node）
+T: 0.1
+fit_window: 2.0          # 圆拟合历史窗口(s)
+phase_window: 0.5        # 角速度估计窗口(s)
+assoc_gate: 1.0          # 观测关联门限(m)
+lost_time_thresh: 0.5    # 超过即断开 ID
+default_radius: 0.35     # 圆拟合失败时的默认半径(m)
+
+detection_topic: /ft/detection
+track_topic: /ft/track_rot
+marker_topic: /ft/debug/marker_rot
+body_id_topic: /ft/body_id

@@ -299,3 +299,7 @@ target_link_libraries(detect_node_v3_2 ${catkin_LIBRARIES} ${OpenCV_LIBS})
 add_executable(detect_node_v3_split bonus/detection_node_v3_split.cpp)
 add_dependencies(detect_node_v3_split ${PROJECT_NAME}_gencfg)
 target_link_libraries(detect_node_v3_split ${catkin_LIBRARIES} ${OpenCV_LIBS})
+
+
+add_executable(ft_rotation_tracker_node src/ft_rotation_tracker_node.cpp)
+target_link_libraries(ft_rotation_tracker_node ${catkin_LIBRARIES} ${OpenCV_LIBS})
