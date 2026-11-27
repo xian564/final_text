@@ -126,6 +126,13 @@ public:
         pnh_.param("hold_frames", hold_frames_, 8);
         pnh_.param("lock_frames", lock_frames_, 20);
         pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
+        pnh_.param("lock_pred_gate_px", lock_pred_gate_px_, 250.0);
+        pnh_.param("white_min_dx", white_min_dx_, 15.0);
+        pnh_.param("white_max_dx", white_max_dx_, 300.0);
+        pnh_.param("white_max_dy", white_max_dy_, 60.0);
+        pnh_.param("white_max_angle", white_max_angle_, 12.0);
+        pnh_.param("white_ratio_min", white_ratio_min_, 0.4);
+        pnh_.param("white_ratio_max", white_ratio_max_, 2.5);
         pnh_.param("lock_ratio_tol", lock_ratio_tol_, 0.1);   // 长宽比相似容差(±10%)
         pnh_.param("mount_x", mount_x_, 0.0);                   // 装甲->车体 安装偏移(相机系)
         pnh_.param("mount_y", mount_y_, 0.0);
@@ -1361,8 +1368,9 @@ private:
                             double corrected = dx / std::max(0.2, std::abs(std::cos(ang)));
                             double lh = std::max(wb[0].long_h, wb[1].long_h);
                             double ratio = corrected / std::max(1.0, lh);
-                            if (dx > 15 && dx <= 300 && dy <= 60 && ddeg < 12 &&
-                                ratio >= 0.4 && ratio <= 2.5) {
+                            if (dx > white_min_dx_ && dx <= white_max_dx_ && dy <= white_max_dy_ &&
+                                ddeg < white_max_angle_ &&
+                                ratio >= white_ratio_min_ && ratio <= white_ratio_max_) {
                                 // [cv] boundingRect：wb[0].cnt → b0
                                 cv::Rect b0 = cv::boundingRect(wb[0].cnt);
                                 // [cv] boundingRect：wb[1].cnt → b1
@@ -1623,6 +1631,9 @@ private:
     int lost_frames_ = 0;
     int lock_frames_ = 20, lock_left_ = 0;
     double lock_gate_px_ = 50.0;
+    double lock_pred_gate_px_ = 250.0;
+    double white_min_dx_ = 15.0, white_max_dx_ = 300.0, white_max_dy_ = 60.0;
+    double white_max_angle_ = 12.0, white_ratio_min_ = 0.4, white_ratio_max_ = 2.5;
     double lock_ratio_tol_ = 0.1;
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     double lock_ratio_ = 0.0;

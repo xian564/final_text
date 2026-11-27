@@ -102,7 +102,12 @@ public:
         pnh_.param("white_area_min", white_area_min_, 500);
         pnh_.param("white_aspect_min", white_aspect_min_, 1.3);
         pnh_.param("white_aspect_max", white_aspect_max_, 6.0);
-        pnh_.param("white_enable", white_enable_, false);   // 极端场景才开，默认关闭
+        pnh_.param("white_enable", white_enable_, false);
+        pnh_.param("dyn_v_min", dyn_v_min_, 180.0);
+        pnh_.param("z_min", z_min_, 0.3);
+        pnh_.param("z_max", z_max_, 15.0);
+        pnh_.param("fcs_gate_px", fcs_gate_px_, 400.0);
+        pnh_.param("fcs_grad_tol", fcs_grad_tol_, 45.0);   // 极端场景才开，默认关闭
         pnh_.param("yellow_h_min", yellow_h_min_, 10);
         pnh_.param("yellow_h_max", yellow_h_max_, 35);
         pnh_.param("yellow_s_min", yellow_s_min_, 100);
@@ -125,6 +130,13 @@ public:
         pnh_.param("hold_frames", hold_frames_, 8);
         pnh_.param("lock_frames", lock_frames_, 20);
         pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
+        pnh_.param("lock_pred_gate_px", lock_pred_gate_px_, 250.0);
+        pnh_.param("white_min_dx", white_min_dx_, 15.0);
+        pnh_.param("white_max_dx", white_max_dx_, 300.0);
+        pnh_.param("white_max_dy", white_max_dy_, 60.0);
+        pnh_.param("white_max_angle", white_max_angle_, 12.0);
+        pnh_.param("white_ratio_min", white_ratio_min_, 0.4);
+        pnh_.param("white_ratio_max", white_ratio_max_, 2.5);
         pnh_.param("lock_ratio_tol", lock_ratio_tol_, 0.1);   // 长宽比相似容差(±10%)
         pnh_.param("hold_max_speed", hold_max_speed_, 8.0);      // 外推最大速度 m/s
 
@@ -312,6 +324,11 @@ private:
         pnh_.setParam("ratio_min", cfg.ratio_min);
         pnh_.setParam("ratio_l_max", cfg.ratio_l_max);
         pnh_.setParam("ratio_s_max", cfg.ratio_s_max);
+        pnh_.setParam("dyn_v_min", cfg.dyn_v_min);
+        pnh_.setParam("z_min", cfg.z_min);
+        pnh_.setParam("z_max", cfg.z_max);
+        pnh_.setParam("fcs_gate_px", cfg.fcs_gate_px);
+        pnh_.setParam("fcs_grad_tol", cfg.fcs_grad_tol);
         pnh_.setParam("bar_h_ratio_min", cfg.bar_h_ratio_min);
         pnh_.setParam("pair_dy_ratio", cfg.pair_dy_ratio);
         pnh_.setParam("quad_align_min", cfg.quad_align_min);
@@ -328,6 +345,9 @@ private:
         aspect_min_ = cfg.aspect_min; aspect_max_ = cfg.aspect_max;
         ratio_min_ = cfg.ratio_min; ratio_l_max_ = cfg.ratio_l_max;
         ratio_s_max_ = cfg.ratio_s_max;
+        dyn_v_min_ = cfg.dyn_v_min;
+        z_min_ = cfg.z_min; z_max_ = cfg.z_max;
+        fcs_gate_px_ = cfg.fcs_gate_px; fcs_grad_tol_ = cfg.fcs_grad_tol;
         bar_h_ratio_min_ = cfg.bar_h_ratio_min;
         pair_dy_ratio_ = cfg.pair_dy_ratio;
         quad_align_min_ = cfg.quad_align_min;
@@ -456,7 +476,7 @@ private:
             }
 
             // 3) 动态高亮掩膜（解决过曝）
-            double dyn_v_thresh = std::max(180.0, max_v - dyn_v_offset_);
+            double dyn_v_thresh = std::max(dyn_v_min_, max_v - dyn_v_offset_);
             cv::Mat high_mask;
             cv::compare(v_chan, dyn_v_thresh, high_mask, cv::CMP_GT);
 
@@ -823,8 +843,8 @@ private:
                                 // [cv] solvePnP：物体点+四点 → rvec/tvec
                                 ok = cv::solvePnP(obj, tg.corners, K_, D_,
                                                   rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
-                            if (ok && tvec.at<double>(2) > 0.3 &&
-                                tvec.at<double>(2) < 15.0) {
+                            if (ok && tvec.at<double>(2) > z_min_ &&
+                                tvec.at<double>(2) < z_max_) {
                                 tg.has_pose = true;
                                 tg.t = cv::Vec3d(tvec.at<double>(0),
                                                  tvec.at<double>(1),
@@ -925,6 +945,8 @@ private:
                             // [cv] countNonZero：mb 计数
                             n_blue = cv::countNonZero(mb);
                         }
+                        if (!std::isfinite(tg.t[0]) || !std::isfinite(tg.t[1]) ||
+                            !std::isfinite(tg.t[2])) continue;   // 过滤 NaN
                         d.is_red = (n_red >= n_blue);
 
                         // position = PnP tvec（相机系，未平滑）
@@ -1021,7 +1043,7 @@ private:
                             double d = cv::norm(targets[k].center2d - lock_pred_);
                             if (d < bestd) { bestd = d; cand = (int)k; }
                         }
-                        if (cand >= 0 && bestd < 250.0) {
+                        if (cand >= 0 && bestd < lock_pred_gate_px_) {
                             best = cand; locked = true; lock_miss_ = 0;
                         } else {
                             ++lock_miss_;
@@ -1299,8 +1321,9 @@ private:
                             double corrected = dx / std::max(0.2, std::abs(std::cos(ang)));
                             double lh = std::max(wb[0].long_h, wb[1].long_h);
                             double ratio = corrected / std::max(1.0, lh);
-                            if (dx > 15 && dx <= 300 && dy <= 60 && ddeg < 12 &&
-                                ratio >= 0.4 && ratio <= 2.5) {
+                            if (dx > white_min_dx_ && dx <= white_max_dx_ && dy <= white_max_dy_ &&
+                                ddeg < white_max_angle_ &&
+                                ratio >= white_ratio_min_ && ratio <= white_ratio_max_) {
                                 // [cv] boundingRect：wb[0].cnt → b0
                                 cv::Rect b0 = cv::boundingRect(wb[0].cnt);
                                 // [cv] boundingRect：wb[1].cnt → b1
@@ -1382,9 +1405,9 @@ private:
                             cv::Point2f c(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
                             // [cv] norm：距离/长度 → 
                             float d = (float)cv::norm(c - prev_center2d_);
-                            if (d > 400.0f) continue;
+                            if (d > fcs_gate_px_) continue;
                             double grad = brightGradient(v_chan, r);
-                            if (std::abs(grad - prev_grad_) > 45.0) continue;
+                            if (std::abs(grad - prev_grad_) > fcs_grad_tol_) continue;
 
                             // 四点亮度一致性：四个光斑核心互相近似，且与上一帧渐变一致
                             double c4[4];
@@ -1514,6 +1537,8 @@ private:
     int sub_queue_, pub_queue_, min_area_;
     bool plane_filter_;
     double plane_dist_ratio_;
+    double dyn_v_min_ = 180.0, z_min_ = 0.3, z_max_ = 15.0;
+    double fcs_gate_px_ = 400.0, fcs_grad_tol_ = 45.0;
     int    hold_frames_;
     double hold_max_speed_;
     bool   has_vsample_ = false, has_vel_ = false;
@@ -1558,6 +1583,9 @@ private:
     int lost_frames_ = 0;
     int lock_frames_ = 20, lock_left_ = 0;
     double lock_gate_px_ = 50.0;
+    double lock_pred_gate_px_ = 250.0;
+    double white_min_dx_ = 15.0, white_max_dx_ = 300.0, white_max_dy_ = 60.0;
+    double white_max_angle_ = 12.0, white_ratio_min_ = 0.4, white_ratio_max_ = 2.5;
     double lock_ratio_tol_ = 0.1;
     cv::Point2f lock_center_ = cv::Point2f(0,0);
     cv::Point2f lock_prev_ = cv::Point2f(0,0);

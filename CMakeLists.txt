@@ -247,7 +247,7 @@ target_link_libraries(detect_node_v2
 )
 
 # ---- v3：22 点终极升级版（新建文件，不影响 v1/v2） ----
-add_executable(detect_node_v3 src/detection_node_v3.cpp)
+add_executable(detect_node_v3 bonus/detection_node_v3.cpp)
 
 add_dependencies(detect_node_v3 ${PROJECT_NAME}_gencfg)
 target_link_libraries(detect_node_v3
@@ -256,7 +256,7 @@ target_link_libraries(detect_node_v3
 )
 
 # ---- v4：平A/大招双模块架构 ----
-add_executable(detect_node_v4 src/detection_node_v4.cpp)
+add_executable(detect_node_v4 bonus/detection_node_v4.cpp)
 target_link_libraries(detect_node_v4
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
@@ -291,6 +291,11 @@ catkin_install_python(PROGRAMS scripts/nn_detector_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 
-add_executable(detect_node_v3_2 src/detection_node_v3_2.cpp)
+add_executable(detect_node_v3_2 bonus/detection_node_v3_2.cpp)
 add_dependencies(detect_node_v3_2 ${PROJECT_NAME}_gencfg)
 target_link_libraries(detect_node_v3_2 ${catkin_LIBRARIES} ${OpenCV_LIBS})
+
+
+add_executable(detect_node_v3_split bonus/detection_node_v3_split.cpp)
+add_dependencies(detect_node_v3_split ${PROJECT_NAME}_gencfg)
+target_link_libraries(detect_node_v3_split ${catkin_LIBRARIES} ${OpenCV_LIBS})
