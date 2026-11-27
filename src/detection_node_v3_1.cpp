@@ -110,7 +110,11 @@ public:
         pnh_.param("pub_queue", pub_queue_, 1);
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
         pnh_.param("min_area", min_area_, 20);
-        pnh_.param("time_window_s", time_window_s_, 0.5);   // 时间窗（瞬移/外推）
+        pnh_.param("time_window_s", time_window_s_, 0.5);
+        pnh_.param("lock_frames", lock_frames_, 20);
+        pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
+        pnh_.param("lock_pred_gate_px", lock_pred_gate_px_, 250.0);
+        pnh_.param("lock_ratio_tol", lock_ratio_tol_, 0.1);   // 时间窗（瞬移/外推）
         pnh_.param("nn_enable", nn_enable_, false);
         pnh_.param<std::string>("nn_model_path", nn_model_path_, "");
         pnh_.param("fcs_min_area", fcs_min_area_, 150.0);
@@ -806,11 +810,25 @@ private:
                     lost_frames_ = 0;
 
 
-                    // ---- 二维平行度择优（最正对）----
+                    // ---- 相邻帧锁定 + 最正对兜底 ----
                     int best = 0;
-                    for (size_t k = 1; k < targets.size(); ++k)
-                        if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
-                            best = static_cast<int>(k);
+                    bool locked = false;
+                    if (lock_left_ > 0) {
+                        double bestd = 1e18; int cand = -1;
+                        for (size_t k = 0; k < targets.size(); ++k) {
+                            if (lock_ratio_ > 1e-3 &&
+                                std::abs(targets[k].ratio - lock_ratio_) > lock_ratio_tol_ * lock_ratio_) continue;
+                            double d = cv::norm(targets[k].center2d - lock_pred_);
+                            if (d < bestd) { bestd = d; cand = (int)k; }
+                        }
+                        if (cand >= 0 && bestd < lock_pred_gate_px_) { best = cand; locked = true; lock_miss_ = 0; }
+                        else if (++lock_miss_ > 7) { lock_left_ = 0; lock_miss_ = 0; }
+                    }
+                    if (!locked) {
+                        for (size_t k = 1; k < targets.size(); ++k)
+                            if (std::abs(targets[k].avg_tilt) < std::abs(targets[best].avg_tilt))
+                                best = static_cast<int>(k);
+                    }
 
                     // ---- 整车中心聚合 ----
                     cv::Point2f vc(0, 0);
@@ -819,6 +837,12 @@ private:
 
                     // ---- 主目标平滑 + 下坠补偿 + TF ----
                     Target& mt = targets[best];
+                    if (lock_left_ > 0) --lock_left_; else lock_left_ = lock_frames_;
+                    lock_prev_ = lock_center_;
+                    lock_center_ = mt.center2d;
+                    lock_pred_ = lock_center_ + (lock_center_ - lock_prev_);
+                    lock_ratio_ = mt.ratio;
+                    lock_miss_ = 0;
                     if (mt.has_pose) {
                         {
                         cv::Vec3d t2(mt.t[0], -mt.t[1], mt.t[2]);
@@ -1062,6 +1086,9 @@ private:
 
     cv::Mat K_, D_;
     double time_window_s_ = 0.5;
+    int    lock_frames_ = 20, lock_left_ = 0, lock_miss_ = 0;
+    cv::Point2f lock_center_{0,0}, lock_prev_{0,0}, lock_pred_{0,0};
+    double lock_ratio_ = 0.0, lock_ratio_tol_ = 0.1, lock_gate_px_ = 50.0, lock_pred_gate_px_ = 250.0;
     double dyn_v_min_ = 180.0, z_min_ = 0.3, z_max_ = 15.0;
     double teleport_scale_ = 1.5, min_speed_z_ = 0.5;
     bool nn_enable_ = false;

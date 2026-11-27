@@ -26,7 +26,7 @@ public:
         nh_.param<double>("r_pos", r_pos_, 0.05);
         nh_.param<double>("lost_time_thresh", lost_time_thresh_, 0.5);
         nh_.param<double>("watchdog_period", watchdog_period_, 0.05);   // 20fps
-        nh_.param<double>("assoc_gate", assoc_gate_, 0.8);               // 关联门限 m
+        nh_.param<double>("assoc_gate", assoc_gate_, 0.5);               // 关联门限 m
         nh_.param<std::string>("detection_topic", detection_topic_, "/ft/detection");
         nh_.param<std::string>("track_topic", track_topic_, "/ft/track");
         nh_.param<std::string>("marker_topic", marker_topic_, "/ft/debug/marker");

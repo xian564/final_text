@@ -95,7 +95,7 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 | 阈值/尺寸/滤波参数不硬编码 | ✅ YAML + 22 项 dynamic_reconfigure |
 | 内参/畸变从 `camera_info` 读 | ✅ |
 | 消息 `header.stamp` 用图像时间戳 | ✅（纯预测用最近一帧） |
-| 四点定义/坐标系写清 | ✅ 本节 4.1、4.2 |
+| 四点定义/坐标系写清 | ✅ 本节第 4 节 |
 | 消息定义在仓库 | ✅ `ft_msgs_pkg/` |
 | 一条 launch 启动检测+跟踪+可视化 | ✅ `test_v3_1.launch` |
 | 跟踪语义、丢检、提前量、marker | ✅ |
