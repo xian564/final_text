@@ -153,3 +153,6 @@ import -window 0xc0000c /tmp/rviz_pose.png
 - 近距/遮挡：`blue_guard.bag`
 
 录法：`scripts/record_debug_video.py` 存 `/ft/debug/image` 帧，ffmpeg 拼标题卡。
+
+> 注：`blue_guard.bag` 原始画面平均亮度约 1.69/255，几乎全黑，只有蓝色灯条可见；
+> 检测仍能出框，故视频保留该段作为“极限低照度”演示。
