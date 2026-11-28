@@ -99,3 +99,62 @@ NN 检测、red_4：
 | 旋转 | 247 | 0.095 m | 0.079 m |
 
 结论不变：全段匀速略优；旋转收益集中在高转速段。
+
+---
+
+# 本机实测流程（2026-11-28）
+
+## 1. 选旋转段
+```bash
+rosbag play bag/red_4.bag --clock -l
+rosrun final_text detect_node_v3_1
+rosbag record -O /tmp/rot_det.bag --duration=25 /ft/detection
+python3 /root/catkin_ws/src/final_text/scripts/check_yaw.py /tmp/rot_det.bag
+```
+结果：
+```
+n = 808
+min = -42.16 deg
+max =  49.32 deg
+range =  91.48 deg
+```
+→ 确认是旋转段。
+
+## 2. 同时跑两个跟踪器并录轨迹
+```bash
+rosrun final_text ft_tracker_node
+rosrun final_text ft_rotation_tracker_node
+rosbag record -O /tmp/rot_eval.bag --duration=25 \
+  /ft/detection /ft/track /ft/track_rot
+```
+
+## 3. 计算预测误差
+```bash
+python3 /root/catkin_ws/src/final_text/scripts/eval_prediction.py \
+  /tmp/rot_eval.bag /ft/track
+python3 /root/catkin_ws/src/final_text/scripts/eval_prediction.py \
+  /tmp/rot_eval.bag /ft/track_rot
+```
+
+## 4. 本机结果
+```
+/ft/track      n=752 mean=0.077 m median=0.027 m
+/ft/track_rot  n=787 mean=0.101 m median=0.028 m
+```
+
+## 5. 怎么看
+- **中位几乎一样**（0.027 vs 0.028）：大多数帧在低速/直线段，两种模型差不多；
+- **平均旋转更差**（0.101 vs 0.077）：少数高转速/跳变帧把均值拉高；
+- 旋转样本更多（787 vs 752），说明当前 `assoc_gate=0.5` 下关联更连续；
+- 要证明旋转收益，必须**按 yaw 角速度分档**再看：
+  ```python
+  # 伪代码
+  if yaw_rate > 30 deg/s: 统计旋转 vs 匀速
+  ```
+- 结论：这段上旋转模型**没有全段优势**，收益只在部分高转速帧。
+
+## 6. 复现注意
+- `eval_prediction.py` 默认检测话题 `/ft/detection`；
+  NN 时加第三个参数 `/ft/detection_nn`；
+- 必须 `source devel/setup.bash`，否则 `ft_msgs` 导入失败；
+- 同一段 bag、同一 `T` 才能对比。
