@@ -156,3 +156,22 @@ import -window 0xc0000c /tmp/rviz_pose.png
 
 > 注：`blue_guard.bag` 平均亮度约 1.69/255，几乎全黑；检测仍能出框，
 > 作为“极限低照度”单独测试，不放入演示视频。
+
+
+## 12. RViz 截图（正确做法）
+
+`armor_v3.rviz` 只有 TF/Marker，3D 场景容易是空的；用 image_demo：
+
+```bash
+rviz -d $(rospack find final_text)/rviz/image_demo.rviz
+# 找到这个 rviz 的 PID
+PID=$(pgrep -n rviz)
+ID=$(xdotool search --pid $PID | head -1)
+xdotool windowsize $ID 1400 900
+import -window $ID /tmp/rviz.png
+```
+
+注意：
+- 不要截 `root`；
+- 不要选 "ROS 1 End-of-Life" 弹窗；
+- 旧 RViz 窗口会干扰，先关掉旧的。
