@@ -69,7 +69,7 @@ class RotTracker {
       2*Sx, 2*Sz, n,
       2*Sxx, 2*Sxz, Sx,
       2*Sxz, 2*Szz, Sz);
-    cv::Mat b = (cv::Mat_<double>(3,1) << Sxx+Szz, Sx3+Sxzz, Sx3+Sz3);
+    cv::Mat b = (cv::Mat_<double>(3,1) << Sxx+Szz, Sx3+Sxzz, Sxxz+Sz3);
     cv::Mat s; if (!cv::solve(A, b, s, cv::DECOMP_SVD)) return false;
     double a=s.at<double>(0), bb=s.at<double>(1), cc=s.at<double>(2);
     double r2 = cc + a*a + bb*bb;
@@ -152,7 +152,9 @@ class RotTracker {
     // 预测：转速足够才用圆周，否则退回匀速（避免直线段引入噪声）
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
     double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
-    bool rotating = has_center_ && std::fabs(w) >= omega_min_;
+    if (!rot_mode_ && std::fabs(w) >= omega_min_) rot_mode_ = true;
+    else if (rot_mode_ && std::fabs(w) < omega_min_ * 0.75) rot_mode_ = false;
+    bool rotating = has_center_ && rot_mode_;
     if (rotating) {
         double cx = center_.x + vx * T_;
         double cz = center_.y + vz * T_;
@@ -182,11 +184,12 @@ class RotTracker {
     }
     // 极限推算：转速足够用圆周，否则直线
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
-    if (has_center_ && std::fabs(omega_) >= omega_min_) {
+    double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
+    if (has_center_ && rot_mode_) {
         double cx = center_.x + vx * gap;
         double cz = center_.y + vz * gap;
         double dx = cur_.x - center_.x, dz = cur_.z - center_.y;
-        double ca = std::cos(omega_ * gap), sa = std::sin(omega_ * gap);
+        double ca = std::cos(w * gap), sa = std::sin(w * gap);
         pred_.x = cx + dx * ca - dz * sa;
         pred_.z = cz + dx * sa + dz * ca;
     } else {
@@ -253,6 +256,7 @@ class RotTracker {
   double omega_min_ = 0.2;
   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
+  bool rot_mode_ = false;
   double phase_ = 0, omega_ = 0;
   double yaw_ = 0, yaw_rate_ = 0;
   bool has_yaw_ = false;
