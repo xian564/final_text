@@ -158,3 +158,65 @@ python3 /root/catkin_ws/src/final_text/scripts/eval_prediction.py \
   NN 时加第三个参数 `/ft/detection_nn`；
 - 必须 `source devel/setup.bash`，否则 `ft_msgs` 导入失败；
 - 同一段 bag、同一 `T` 才能对比。
+
+---
+
+# 按 yaw 角速度分档（脚本 + 命令解释）
+
+## 脚本
+`scripts/eval_prediction_by_rate.py`
+
+## 命令
+```bash
+source /opt/ros/noetic/setup.bash
+source /root/catkin_ws/devel/setup.bash
+
+python3 scripts/eval_prediction_by_rate.py \
+  /tmp/rot_eval.bag /ft/track /ft/detection 30
+
+python3 scripts/eval_prediction_by_rate.py \
+  /tmp/rot_eval.bag /ft/track_rot /ft/detection 30
+```
+
+## 参数逐个解释
+| 参数 | 含义 |
+|---|---|
+| `/tmp/rot_eval.bag` | 同时含检测与轨迹的 bag |
+| `/ft/track` | 要评估的轨迹话题（匀速） |
+| `/ft/detection` | 检测话题（默认值，可写 `/ft/detection_nn`） |
+| `30` | 分档阈值，单位 **deg/s** |
+
+## 脚本内部步骤
+1. 读 `det_topic`：每帧取第一个检测，记录 `(时间, 位置, yaw)`；
+2. 读轨迹：`(时间, tracking, 当前位置, 预测位置)`；
+3. 对每个 `tracking=true` 的轨迹：
+   - 找它之后 0.25s 内最近的检测帧；
+   - 用“当前位置”匹配同一块板，得到下一帧实际位置；
+   - 误差 = `||预测位置 - 实际位置||`；
+4. 估计该时刻的 yaw 角速度（相邻检测帧的 yaw 差 / dt）；
+5. 按 `>30` 和 `<=30` 分两档，输出样本数/均值/中位。
+
+## 本机结果
+```
+/ft/track     >30: n=474 mean=0.047 median=0.020
+              <=30: n=278 mean=0.027 median=0.013
+/ft/track_rot >30: n=501 mean=0.062 median=0.020
+              <=30: n=286 mean=0.033 median=0.014
+```
+
+## 解读
+- 高转速段：中位相同（0.020），平均匀速更好（0.047 vs 0.062）；
+- 低转速段：匀速也更好；
+- 说明这段数据上旋转模型没有优势，瓶颈是检测换板/圆心不稳，不是公式；
+- 想看到旋转收益，需要更干净的旋转数据或先修关联。
+
+## 关于 RViz 日志
+```
+compiled against OGRE 1.9.0
+Forcing OpenGl version 0.
+OpenGL device: llvmpipe
+Detected jump back in time of 24.061s. Clearing TF buffer.
+```
+- OGRE/llvmpipe：容器无 GPU，走软件渲染，正常；
+- `jump back in time`：bag 循环/回放时间倒退，RViz 清 TF 缓存；
+  短暂丢 TF，不是代码错误。
