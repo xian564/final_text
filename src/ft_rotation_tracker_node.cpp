@@ -25,6 +25,7 @@ class RotTracker {
     nh_.param<double>("default_radius", R_, 0.35);
     nh_.param<double>("omega_min", omega_min_, 0.2);
     nh_.param<double>("fit_res_max", fit_res_max_, 0.05);
+    nh_.param<double>("predict_cap_m", predict_cap_m_, 0.6);
     nh_.param<double>("q_pos", q_pos_, 0.1);
     nh_.param<double>("q_vel", q_vel_, 0.5);
     nh_.param<double>("r_pos", r_pos_, 0.05);
@@ -36,8 +37,12 @@ class RotTracker {
     kf_.transitionMatrix = cv::Mat::eye(6, 6, CV_32F);
     kf_.measurementMatrix = cv::Mat::zeros(3, 6, CV_32F);
     for (int i = 0; i < 3; ++i) kf_.measurementMatrix.at<float>(i, i) = 1.0f;
-    cv::setIdentity(kf_.processNoiseCov, cv::Scalar::all(1e-2));
-    cv::setIdentity(kf_.measurementNoiseCov, cv::Scalar::all(1e-2));
+    cv::setIdentity(kf_.processNoiseCov, cv::Scalar::all(0));
+    for (int i = 0; i < 3; ++i) {
+        kf_.processNoiseCov.at<float>(i, i) = (float)q_pos_;
+        kf_.processNoiseCov.at<float>(i + 3, i + 3) = (float)q_vel_;
+    }
+    cv::setIdentity(kf_.measurementNoiseCov, cv::Scalar::all(r_pos_));
     cv::setIdentity(kf_.errorCovPost, cv::Scalar::all(1.0));
 
     sub_ = nh_.subscribe(det_topic_, 1, &RotTracker::detCb, this);
@@ -89,7 +94,7 @@ class RotTracker {
 
     // 观测选择
     int pick = -1;
-    if (has_pred_) {
+    if (has_pred_ && rot_mode_) {
       double best = gate_;
       for (size_t i=0;i<msg->detections.size();++i) {
         auto& p = msg->detections[i].pose.position;
@@ -97,6 +102,16 @@ class RotTracker {
         if (d < best) { best = d; pick = (int)i; }
       }
       if (pick < 0) { onLost(stamp); return; }   // 门限内没有，交给预测
+    } else if (tracking_) {
+      // 直线模式：像匀速跟踪器一样，用当前状态关联
+      double best = gate_, cx = kf_.statePost.at<float>(0),
+             cy = kf_.statePost.at<float>(1), cz = kf_.statePost.at<float>(2);
+      for (size_t i=0;i<msg->detections.size();++i) {
+        auto& p = msg->detections[i].pose.position;
+        double d = std::sqrt((p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy)+(p.z-cz)*(p.z-cz));
+        if (d < best) { best = d; pick = (int)i; }
+      }
+      if (pick < 0) { onLost(stamp); return; }
     } else {
       // 首次：最靠近相机轴
       double best = 1e9;
@@ -164,21 +179,35 @@ class RotTracker {
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
     double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
     bool fast = (std::fabs(w) >= omega_min_) && (fit_res_ < fit_res_max_) && has_center_;
-    rot_cnt_ = std::max(0, std::min(10, rot_cnt_ + (fast ? 1 : -1)));
+    rot_cnt_ = std::max(0, std::min(10, rot_cnt_ + (fast ? 1 : -3)));
     rot_mode_ = (rot_cnt_ >= 3);          // 连续 3 帧可信才进旋转
     bool rotating = rot_mode_;
+    double lin_x = x + vx * T_, lin_z = z + vz * T_;
     if (rotating) {
         double cx = center_.x + vx * T_;
         double cz = center_.y + vz * T_;
         double dx = x - center_.x, dz = z - center_.y;
         double ca = std::cos(w * T_), sa = std::sin(w * T_);
-        pred_.x = cx + dx * ca - dz * sa;
-        pred_.z = cz + dx * sa + dz * ca;
+        double rx = cx + dx * ca - dz * sa;
+        double rz = cz + dx * sa + dz * ca;
+        double a = 1.0 - fit_res_ / std::max(1e-3, fit_res_max_);
+        a = std::max(0.0, std::min(1.0, a));
+        pred_.x = lin_x + a * (rx - lin_x);
+        pred_.z = lin_z + a * (rz - lin_z);
     } else {
-        pred_.x = x + vx * T_;
-        pred_.z = z + vz * T_;
+        pred_.x = lin_x;
+        pred_.z = lin_z;
     }
     pred_.y = y + vy * T_;
+    // 预测偏移限幅，避免速度尖峰把预测拉远
+    {
+      double dx = pred_.x - x, dy2 = pred_.y - y, dz = pred_.z - z;
+      double dn = std::sqrt(dx*dx + dy2*dy2 + dz*dz);
+      if (dn > predict_cap_m_) {
+        double k = predict_cap_m_ / dn;
+        pred_.x = x + dx*k; pred_.y = y + dy2*k; pred_.z = z + dz*k;
+      }
+    }
     has_pred_ = true;
     cur_.x = x; cur_.y = y; cur_.z = z;
 
@@ -267,7 +296,7 @@ class RotTracker {
   double gate_ = 1.0, lost_thresh_ = 0.5, q_pos_=0.1, q_vel_=0.5, r_pos_=0.05;
   double omega_min_ = 0.2;
   int rot_cnt_ = 0;
-  double fit_res_ = 1e9, fit_res_max_ = 0.05;
+  double fit_res_ = 1e9, fit_res_max_ = 0.05, predict_cap_m_ = 0.6;
   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
   bool rot_mode_ = false;
