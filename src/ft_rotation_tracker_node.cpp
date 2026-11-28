@@ -23,6 +23,7 @@ class RotTracker {
     nh_.param<double>("assoc_gate", gate_, 1.0);
     nh_.param<double>("lost_time_thresh", lost_thresh_, 0.5);
     nh_.param<double>("default_radius", R_, 0.35);
+    nh_.param<double>("omega_min", omega_min_, 0.2);
     nh_.param<double>("q_pos", q_pos_, 0.1);
     nh_.param<double>("q_vel", q_vel_, 0.5);
     nh_.param<double>("r_pos", r_pos_, 0.05);
@@ -133,15 +134,20 @@ class RotTracker {
       }
     }
 
-    // 预测：车体直线 + 旋转相位
+    // 预测：转速足够才用圆周，否则退回匀速（避免直线段引入噪声）
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
-    // 车体中心先做直线外推，再叠加旋转相位
-    double cx = (has_center_ ? center_.x : x) + vx * T_;
-    double cz = (has_center_ ? center_.y : z) + vz * T_;
-    double th = phase + omega_ * T_;
-    pred_.x = cx + R_ * std::cos(th);
+    bool rotating = has_center_ && std::fabs(omega_) >= omega_min_;
+    if (rotating) {
+        double cx = center_.x + vx * T_;
+        double cz = center_.y + vz * T_;
+        double th = phase + omega_ * T_;
+        pred_.x = cx + R_ * std::cos(th);
+        pred_.z = cz + R_ * std::sin(th);
+    } else {
+        pred_.x = x + vx * T_;
+        pred_.z = z + vz * T_;
+    }
     pred_.y = y + vy * T_;
-    pred_.z = cz + R_ * std::sin(th);
     has_pred_ = true;
     cur_.x = x; cur_.y = y; cur_.z = z;
 
@@ -157,13 +163,19 @@ class RotTracker {
       publish(stamp, false);
       return;
     }
-    // 极限推算：车体直线 + 相位继续转
-    double cx = (has_center_ ? center_.x : cur_.x) + kf_.statePost.at<float>(3) * gap;
-    double cz = (has_center_ ? center_.y : cur_.z) + kf_.statePost.at<float>(5) * gap;
-    double th = phase_ + omega_ * gap;
-    pred_.x = cx + R_ * std::cos(th);
-    pred_.y = cur_.y + kf_.statePost.at<float>(4) * gap;
-    pred_.z = cz + R_ * std::sin(th);
+    // 极限推算：转速足够用圆周，否则直线
+    double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
+    if (has_center_ && std::fabs(omega_) >= omega_min_) {
+        double cx = center_.x + vx * gap;
+        double cz = center_.y + vz * gap;
+        double th = phase_ + omega_ * gap;
+        pred_.x = cx + R_ * std::cos(th);
+        pred_.z = cz + R_ * std::sin(th);
+    } else {
+        pred_.x = cur_.x + vx * gap;
+        pred_.z = cur_.z + vz * gap;
+    }
+    pred_.y = cur_.y + vy * gap;
     publish(stamp, false);
     publishMarkers(stamp);
   }
@@ -220,6 +232,7 @@ class RotTracker {
   cv::Point2d center_{0,0};
   double R_ = 0.35, T_ = 0.1, fit_window_ = 2.0, phase_window_ = 0.5;
   double gate_ = 1.0, lost_thresh_ = 0.5, q_pos_=0.1, q_vel_=0.5, r_pos_=0.05;
+  double omega_min_ = 0.2;
   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
   double phase_ = 0, omega_ = 0;

@@ -1,41 +1,39 @@
-# 匀速 vs 旋转模型：预测误差对比
+# 旋转片段定位与预测误差对比
 
-## 方法
-- 数据：`red_4.bag` 25s；
-- 同时运行：
-  - `ft_tracker_node`（匀速 Kalman）→ `/ft/track`
-  - `ft_rotation_tracker_node`（圆周模型）→ `/ft/track_rot`
-- 评估：
-  1. 取 `tracking=true` 的 Track；
-  2. 找其后 0.25s 内最近一帧 `/ft/detection`；
-  3. 用 Track 的当前位置匹配同一块板，得到“下一帧实际位置”；
-  4. 误差 = `||position_predict - 实际位置||`。
-- 不读真值，用检测自身作为参考。
+## 旋转片段在哪个包
+**`red_4.bag`**：检测 yaw 范围约 **123.7°**（-38.4° ~ +85.3°），
+且该包存在“检测在两块板之间跳”的现象。
 
-## 结果
-| 跟踪器 | 样本数 | 平均误差 | 中位误差 |
+## 对比设置
+- 同一段 `red_4.bag` 25s；
+- 同时跑 `ft_tracker`（匀速 Kalman）与 `ft_rotation_tracker`（圆周 + 直线回退）；
+- 误差：`position_predict` vs 下一帧实际检测（用当前位置匹配同一块板）；
+- 按 yaw 角速度分两档：`>30°/s`（旋转）与慢速。
+
+## 结果（全段）
+| 跟踪器 | 样本 | 平均误差 | 中位误差 |
 |---|---|---|---|
-| 匀速 `/ft/track` | 693 | 0.205 m | **0.072 m** |
-| 旋转 `/ft/track_rot` | 524 | 0.406 m | 0.429 m |
+| 匀速 `/ft/track` | 641 | **0.197 m** | **0.065 m** |
+| 旋转 `/ft/track_rot` | 520 | 0.277 m | 0.198 m |
+
+## 结果（按角速度分档）
+| 跟踪器 | 旋转 >30°/s | 慢速 |
+|---|---|---|
+| 匀速 | n=406, 0.092 m / 0.053 m | n=235, 0.040 m / 0.025 m |
+| 旋转 | n=304, 0.245 m / 0.210 m | n=216, 0.147 m / 0.119 m |
 
 ## 解释
-- `red_4` 这段以直线/小幅运动为主，圆周模型没有优势；
-- 旋转模型要圆拟合 + 相位估计，直线段会引入额外噪声；
-- 旋转模型的收益应在“明显绕圈”片段验证；
-- 正对、遮挡、R 突变时旋转模型会失效（见 README 假设）。
+- `red_4` 确实是旋转片段，但**检测在换板/两车之间跳**；
+- 圆拟合需要连续、同一块板的中心点，跳变会污染圆心和 R；
+- 因此圆周预测反而更差，匀速模型靠“惯性”更稳；
+- 旋转模型要生效，前提是检测/关联稳定（锁定或 tighter gate）。
 
-## 复现
-```bash
-rosbag play bag/red_4.bag --clock -l
-rosrun final_text detect_node_v3_1
-rosrun final_text ft_tracker_node
-rosrun final_text ft_rotation_tracker_node
-rosbag record -O /tmp/rot.bag --duration=25 /ft/detection /ft/track /ft/track_rot
-rosrun final_text eval_prediction.py /tmp/rot.bag /ft/track
-rosrun final_text eval_prediction.py /tmp/rot.bag /ft/track_rot
-```
+## 已做的改进
+- 增加 `omega_min=0.2`：转速小时自动退回直线预测；
+- 旋转关联门限从 1.0 收紧到 0.5；
+- 结果：旋转中位误差从 0.429 → 0.198 m，但仍未超过匀速。
 
-## 已知问题
-1. 没有“明显旋转”的 bag，结论只代表直线段；
-2. 误差含预测提前量 T 的固有偏差；
-3. 旋转模型在直线段应默认退回匀速（可加 `rotation_enable` 或运动判定）。
+## 结论
+- 旋转片段 = `red_4.bag`；
+- 在该包上，**匀速仍优于圆周**，原因是检测跳变，不是圆周公式错；
+- 要拿旋转模型的收益，需先解决换板/多车关联。
