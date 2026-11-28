@@ -68,7 +68,7 @@ public:
         ros::Time now = ros::Time::now();
         if (!is_tracking_) return;
 
-        double gap = (now - last_det_time_).toSec();
+        double gap = (ros::Time::now() - last_det_wall_).toSec();
         if (gap < 0.0) {                  // 仿真时间回跳
             is_tracking_ = false;
             return;
@@ -125,6 +125,7 @@ private:
             last_step_time_ = stamp;
             last_pred_time_ = stamp;
             is_tracking_ = true;
+            last_det_wall_ = ros::Time::now();
             return;
         }
 
@@ -142,6 +143,7 @@ private:
 
         frame_id_ = msg->header.frame_id;
         last_det_time_ = stamp;
+        last_det_wall_ = ros::Time::now();
         last_step_time_ = stamp;
         last_pred_time_ = stamp;
         publishTrack(stamp, true);
@@ -254,6 +256,7 @@ private:
     std::string frame_id_ = "hk_camera_ca";
     ros::Time last_det_time_, last_step_time_, last_pred_time_;
     ros::Time last_image_stamp_;
+    ros::Time last_det_wall_;
 
     double predict_T_;
     double vmax_mps_ = 6.0;

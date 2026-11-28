@@ -143,3 +143,13 @@ xwininfo -root -tree | grep -i rviz   # 找窗口 id
 import -window 0xc0000c /tmp/rviz_pose.png
 ```
 注意：`import -window root` 在部分 X 服务上会报 `Resource temporarily unavailable`，要指定 RViz 窗口 id。
+
+
+## 11. 演示视频
+
+`docs/demo.mp4`（约 2 分钟）：
+- 静止/远距：`red_4.bag`
+- 匀速：`red_1&3(1).bag`
+- 近距/遮挡：`blue_guard.bag`
+
+录法：`scripts/record_debug_video.py` 存 `/ft/debug/image` 帧，ffmpeg 拼标题卡。
