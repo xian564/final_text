@@ -80,6 +80,7 @@ class RotTracker {
 
   void detCb(const ft_msgs::Detections::ConstPtr& msg) {
     ros::Time stamp = msg->header.stamp;
+    frame_id_ = msg->header.frame_id;
     if (msg->detections.empty()) { onLost(stamp); return; }
 
     // 观测选择
@@ -210,7 +211,7 @@ class RotTracker {
   void publish(ros::Time stamp, bool tracking) {
     ft_msgs::Track out;
     out.header.stamp = stamp;
-    out.header.frame_id = "hk_camera_ca";
+    out.header.frame_id = frame_id_;
     out.id = body_id_ > 0 ? body_id_ : 1;
     out.tracking = tracking;
     out.valid = tracking;
@@ -232,7 +233,7 @@ class RotTracker {
   void publishMarkers(ros::Time stamp) {
     auto mk = [&](int id, const cv::Point3d& p, float r, float g, float b, const std::string& ns) {
       visualization_msgs::Marker m;
-      m.header.stamp = stamp; m.header.frame_id = "hk_camera_ca";
+      m.header.stamp = stamp; m.header.frame_id = frame_id_;
       m.ns = ns; m.id = id; m.type = visualization_msgs::Marker::SPHERE;
       m.action = visualization_msgs::Marker::ADD;
       m.pose.position.x = p.x; m.pose.position.y = p.y; m.pose.position.z = p.z;
@@ -264,6 +265,7 @@ class RotTracker {
   ros::Time last_t_, phase_t_;
   int body_id_ = 0;
   cv::Point3d cur_{0,0,0}, pred_{0,0,0};
+  std::string frame_id_ = "hk_camera_ca";
 };
 
 int main(int argc, char** argv) {

@@ -27,6 +27,7 @@ class NnNode {
     pnh.param("number_thres", number_thres_, 0.5);
     pnh.param("nms_thres", nms_thres_, 0.45);
     pnh.param("pnp_scale", pnp_scale_, 1.0);
+    pnh.param("large_ratio", large_ratio_, 3.0);
     pnh.param("armor_large_w", armor_large_w_, 0.230);
     pnh.param("armor_large_h", armor_large_h_, 0.060);
     pnh.param("armor_small_w", armor_small_w_, 0.135);
@@ -124,7 +125,7 @@ class NnNode {
                         cv::norm(a.corners[3] - a.corners[2]));
       double h = 0.5 * (cv::norm(a.corners[0] - a.corners[3]) +
                         cv::norm(a.corners[1] - a.corners[2]));
-      bool is_large = (h > 1e-3 && w / h > 3.0);
+      bool is_large = (h > 1e-3 && w / h > large_ratio_);
       double Wb = (is_large ? armor_large_w_ : armor_small_w_) * 0.5 * pnp_scale_;
       double Hb = (is_large ? armor_large_h_ : armor_small_h_) * 0.5 * pnp_scale_;
       std::vector<cv::Point3f> obj = {
@@ -227,6 +228,7 @@ class NnNode {
   bool ready_ = false, has_prev_ = false;
   cv::Point2f prev_center_;
   double color_thres_, number_thres_, nms_thres_, pnp_scale_;
+  double large_ratio_ = 3.0;
   double armor_large_w_, armor_large_h_, armor_small_w_, armor_small_h_;
   double lock_gate_px_;
 };

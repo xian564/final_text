@@ -112,6 +112,7 @@ public:
         pnh_.param<std::string>("tf_child_frame", tf_child_, "armor_v3");
         pnh_.param("min_area", min_area_, 20);
         pnh_.param("time_window_s", time_window_s_, 0.5);
+        pnh_.param("digit_thres", digit_thres_, 0.5);
         pnh_.param("lock_frames", lock_frames_, 20);
         pnh_.param("lock_gate_px", lock_gate_px_, 50.0);
         pnh_.param("lock_pred_gate_px", lock_pred_gate_px_, 250.0);
@@ -296,6 +297,7 @@ private:
     void drCallback(final_text::VisionConfig& cfg, uint32_t level) {
         (void)level;
         pnh_.setParam("dyn_v_min", cfg.dyn_v_min);
+        pnh_.setParam("ratio_s_max", cfg.ratio_s_max);
         pnh_.setParam("z_min", cfg.z_min);
         pnh_.setParam("z_max", cfg.z_max);
         pnh_.setParam("red_h_min", cfg.red_h_min);
@@ -316,6 +318,9 @@ private:
         pnh_.setParam("pair_y_ratio", cfg.pair_y_ratio);
         pnh_.setParam("white_enable", cfg.white_enable);
 
+        dyn_v_min_ = cfg.dyn_v_min;
+        z_min_ = cfg.z_min; z_max_ = cfg.z_max;
+        ratio_s_max_ = cfg.ratio_s_max;
         red_h_min_ = cfg.red_h_min; red_h_max_ = cfg.red_h_max;
         hsv_sv_min_ = cfg.hsv_sv_min;
         blue_h_min_ = cfg.blue_h_min; blue_h_max_ = cfg.blue_h_max;
@@ -361,7 +366,7 @@ private:
             double score = res.at<float>(0, 0);
             if (score > best) { best = score; label = digit_labels_[i]; }
         }
-        return (best > 0.5) ? label : 0;
+        return (best > digit_thres_) ? label : 0;
     }
 
     // ---------- 神经网络接口（可选）：IDetector::detect -> PnP -> /ft/detection ----------
@@ -1142,6 +1147,7 @@ private:
 
     cv::Mat K_, D_;
     double time_window_s_ = 0.5;
+    double digit_thres_ = 0.5;
     int    lock_frames_ = 20, lock_left_ = 0, lock_miss_ = 0;
     cv::Point2f lock_center_{0,0}, lock_prev_{0,0}, lock_pred_{0,0};
     double lock_ratio_ = 0.0, lock_ratio_tol_ = 0.1, lock_gate_px_ = 50.0, lock_pred_gate_px_ = 250.0;
