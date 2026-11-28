@@ -153,7 +153,7 @@ class OnnxDetector : public IDetector {
             a.corners[2] = p[2];   // BR
             a.corners[3] = p[3];   // BL
             a.color = color;
-            a.number = best_n + 1;
+            a.number = (best_n == 5) ? 0 : best_n;  // 类别索引即编号；5 不使用
             a.score = cs;
             cand.push_back(a);
 

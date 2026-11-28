@@ -80,7 +80,7 @@ roslaunch final_text test_vision.launch mode:=tradition
 | C++ 后端（ORT/OpenVINO） | ✅ | ORT 1.31.1 |
 | letterbox/补边/RGB/归一化 | ✅ | `detector_interface.hpp` |
 | 保存 scale/pad 并还原 | ✅ | 每帧局部变量 |
-| 解码颜色/编号/四角点 | ✅ | 21 行解码 |
+| 解码颜色/编号/四角点 | ✅ | 21 行解码，索引即编号 |
 | 角点还原原图、稳定顺序 | ✅ | `orderCorners()` 几何重排 TL/TR/BR/BL |
 | 置信度筛选 + 去重 | ✅ | 0.5/0.5/0.45 |
 | 接入 PnP/跟踪、发布 | ✅ | `/ft/detection_nn`、tracker |
@@ -91,7 +91,7 @@ roslaunch final_text test_vision.launch mode:=tradition
 | 平均单帧耗时 | ✅ | 64–81 ms |
 
 ## 9. 已知问题
-1. 编号仍有 5：已加“连续 3 帧不一致才切换”的平滑，但模型原始输出就是 5；
+1. 编号偏移已修正：原代码 `best_n+1` 导致 4→5；改为索引即编号后，画面“4”输出 4；
 2. 传统 vs NN 对比图中，传统该帧漏检、NN 多检 1 个；
 3. 四角点顺序未做几何校验，倾斜大时可能错序；
 4. RViz 视角只看到 TF 轴，场景为空（未加 camera 显示）；
