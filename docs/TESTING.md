@@ -134,3 +134,12 @@ roslaunch final_text test_vision.launch mode:=nn model_path:=/root/catkin_ws/bag
 tradition: /ft/detection 30.5 Hz, number=0（无模板）
 nn:        /ft/detection 15.2 Hz, number=5（NN 输出）
 ```
+
+
+## 10. RViz 截图（无 ffmpeg 时）
+```bash
+export DISPLAY=:0
+xwininfo -root -tree | grep -i rviz   # 找窗口 id
+import -window 0xc0000c /tmp/rviz_pose.png
+```
+注意：`import -window root` 在部分 X 服务上会报 `Resource temporarily unavailable`，要指定 RViz 窗口 id。

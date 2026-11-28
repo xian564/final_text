@@ -10,6 +10,30 @@
 #include <string>
 #include <vector>
 
+
+static inline void orderCorners(cv::Point2f p[4]) {
+    // 按 TL,TR,BR,BL 重排：TL=min(x+y), BR=max(x+y), TR=min(y-x), BL=max(y-x)
+    int tl=0, br=0, tr=0, bl=0;
+    float s_min=1e18f, s_max=-1e18f, d_min=1e18f, d_max=-1e18f;
+    for (int i=0;i<4;++i) {
+        float s=p[i].x+p[i].y, d=p[i].y-p[i].x;
+        if (s<s_min){s_min=s;tl=i;}
+        if (s>s_max){s_max=s;br=i;}
+        if (d<d_min){d_min=d;tr=i;}
+        if (d>d_max){d_max=d;bl=i;}
+    }
+    if (tl==tr||tl==br||tl==bl||tr==br||tr==bl||br==bl) {
+        // 退化：按质心角度排序
+        cv::Point2f c(0,0);
+        for(int i=0;i<4;++i)c+=p[i]; c*=0.25f;
+        std::sort(p,p+4,[&](const cv::Point2f&a,const cv::Point2f&b){
+            return std::atan2(a.y-c.y,a.x-c.x) < std::atan2(b.y-c.y,b.x-c.x);});
+        return;
+    }
+    cv::Point2f q[4] = {p[tl],p[tr],p[br],p[bl]};
+    for(int i=0;i<4;++i)p[i]=q[i];
+}
+
 struct ArmorObservation {
     cv::Point2f corners[4];   // TL, TR, BR, BL（原图坐标）
     int   color = 2;          // 0 蓝, 1 红, 2 熄灭
@@ -123,10 +147,11 @@ class OnnxDetector : public IDetector {
                 p[k] = cv::Point2f((x - pad_x) / scale, (y - pad_y) / scale);
             }
             ArmorObservation a;
+            orderCorners(p);       // 几何重排，保证 TL,TR,BR,BL
             a.corners[0] = p[0];   // TL
-            a.corners[1] = p[3];   // TR
+            a.corners[1] = p[1];   // TR
             a.corners[2] = p[2];   // BR
-            a.corners[3] = p[1];   // BL
+            a.corners[3] = p[3];   // BL
             a.color = color;
             a.number = best_n + 1;
             a.score = cs;

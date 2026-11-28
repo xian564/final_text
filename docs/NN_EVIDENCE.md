@@ -61,6 +61,8 @@ x: 0.106  y: -0.299  z: 4.50
 ## 6. 截图证据
 - 四角点/编号：`docs/nn_demo.png`
 - 传统 vs NN 同帧：`docs/nn_compare.png`（左传统、右 NN）
+- 位姿三轴+距离：`docs/nn_pose.png`
+- RViz TF：`docs/rviz_pose.png`
 - 传统/NN 对比另一张：`docs/compare_demo.png`
 
 ## 7. 模式切换
@@ -79,20 +81,20 @@ roslaunch final_text test_vision.launch mode:=tradition
 | letterbox/补边/RGB/归一化 | ✅ | `detector_interface.hpp` |
 | 保存 scale/pad 并还原 | ✅ | 每帧局部变量 |
 | 解码颜色/编号/四角点 | ✅ | 21 行解码 |
-| 角点还原原图、稳定顺序 | ⚠️ | 按 p0/p3/p2/p1 映射，未逐帧验证 |
+| 角点还原原图、稳定顺序 | ✅ | `orderCorners()` 几何重排 TL/TR/BR/BL |
 | 置信度筛选 + 去重 | ✅ | 0.5/0.5/0.45 |
 | 接入 PnP/跟踪、发布 | ✅ | `/ft/detection_nn`、tracker |
 | 参数切换传统/NN | ✅ | `mode:=tradition|nn` |
-| Bag 展示原图/四角点/位姿 | ⚠️ | 原图+四角点有；RViz 位姿截图缺 |
+| Bag 展示原图/四角点/位姿 | ✅ | `nn_pose.png`（四角点+三轴+tvec）；`rviz_pose.png`（TF） |
 | 后端/预处理/张量/阈值说明 | ✅ | `docs/nn_tutorial.md` |
 | 传统 vs NN 同帧 | ✅ | `docs/nn_compare.png` |
 | 平均单帧耗时 | ✅ | 64–81 ms |
 
 ## 9. 已知问题
-1. 同一帧两个候选编号都为 5（编号头不稳/远距小目标）；
+1. 编号仍有 5：已加“连续 3 帧不一致才切换”的平滑，但模型原始输出就是 5；
 2. 传统 vs NN 对比图中，传统该帧漏检、NN 多检 1 个；
 3. 四角点顺序未做几何校验，倾斜大时可能错序；
-4. RViz 位姿截图还没补；
+4. RViz 视角只看到 TF 轴，场景为空（未加 camera 显示）；
 5. 未用 OpenVINO（作业允许 ORT）。
 
 ## 10. 复现命令汇总

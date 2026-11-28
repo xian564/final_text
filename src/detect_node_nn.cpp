@@ -137,10 +137,24 @@ class NnNode {
       if (!ok) ok = cv::solvePnP(obj, img, K_, D_, rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
       if (!ok || tvec.at<double>(2) <= 0.3 || tvec.at<double>(2) > 15.0) continue;
 
+      // 画位姿三轴（原点 + 0.1m 的 x/y/z）
+      std::vector<cv::Point3f> axes = {
+          {0,0,0}, {0.1f,0,0}, {0,0.1f,0}, {0,0,0.1f}};
+      std::vector<cv::Point2f> proj;
+      cv::projectPoints(axes, rvec, tvec, K_, D_, proj);
+      cv::line(canvas, proj[0], proj[1], cv::Scalar(0,0,255), 2);  // x 红
+      cv::line(canvas, proj[0], proj[2], cv::Scalar(0,255,0), 2);  // y 绿
+      cv::line(canvas, proj[0], proj[3], cv::Scalar(255,0,0), 2);  // z 蓝
+      char pose_txt[128];
+      snprintf(pose_txt, sizeof(pose_txt), "t=(%.2f,%.2f,%.2f)m",
+               tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+      cv::putText(canvas, pose_txt, cv::Point(minx, maxy + 22),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
+
       ft_msgs::Detection d;
       d.header = msg->header;
       d.id = (int)k + 1;
-      d.number = a.number;
+      d.number = smoothNumber(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2), a.number);
       d.is_red = (a.color == 1);
       d.is_large_armor = is_large;
       d.pose.position.x = tvec.at<double>(0);
@@ -177,6 +191,26 @@ class NnNode {
     out.encoding = "bgr8";
     out.image = canvas;
     image_pub_.publish(out.toImageMsg());
+  }
+
+  struct PrevNum { float x, y, z; int num; int cnt; };
+  std::vector<PrevNum> prev_nums_;
+
+  int smoothNumber(double x, double y, double z, int num) {
+    int best = -1; double bd = 0.4;
+    for (size_t i = 0; i < prev_nums_.size(); ++i) {
+      double d = std::sqrt(std::pow(prev_nums_[i].x - x, 2) +
+                           std::pow(prev_nums_[i].y - y, 2) +
+                           std::pow(prev_nums_[i].z - z, 2));
+      if (d < bd) { bd = d; best = (int)i; }
+    }
+    if (best < 0) { prev_nums_.push_back({(float)x,(float)y,(float)z,num,0}); return num; }
+    PrevNum& p = prev_nums_[best];
+    p.x=(float)x; p.y=(float)y; p.z=(float)z;
+    if (num == p.num) { p.cnt = 0; return num; }
+    if (++p.cnt < 3) return p.num;
+    p.num = num; p.cnt = 0;
+    return num;
   }
 
   ros::NodeHandle nh_, pnh_;
