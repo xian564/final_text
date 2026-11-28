@@ -345,6 +345,13 @@ private:
         dyn_v_min_ = cfg.dyn_v_min;
         z_min_ = cfg.z_min; z_max_ = cfg.z_max;
         pair_y_ratio_ = cfg.pair_y_ratio; white_enable_ = cfg.white_enable;
+        pnh_.setParam("bar_h_ratio_min", cfg.bar_h_ratio_min_v3); bar_h_ratio_min_ = cfg.bar_h_ratio_min_v3;
+        pnh_.setParam("pair_dy_ratio", cfg.pair_dy_ratio_v3); pair_dy_ratio_ = cfg.pair_dy_ratio_v3;
+        pnh_.setParam("quad_align_min", cfg.quad_align_min_v3); quad_align_min_ = cfg.quad_align_min_v3;
+        pnh_.setParam("quad_diag_tol", cfg.quad_diag_tol_v3); quad_diag_tol_ = cfg.quad_diag_tol_v3;
+        pnh_.setParam("fcs_gate_px", cfg.fcs_gate_px_v3); fcs_gate_px_ = cfg.fcs_gate_px_v3;
+        pnh_.setParam("fcs_grad_tol", cfg.fcs_grad_tol_v3); fcs_grad_tol_ = cfg.fcs_grad_tol_v3;
+
     }
 
     // 每 0.5s 重新读取参数：rosparam set 后实时生效
