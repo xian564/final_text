@@ -48,6 +48,12 @@ class RotTracker {
  private:
   void idCb(const std_msgs::Int32::ConstPtr& m) { body_id_ = m->data; }
 
+  static double quatYaw(const geometry_msgs::Quaternion& q) {
+    double s = 2.0 * (q.w * q.z + q.x * q.y);
+    double c = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    return std::atan2(s, c);
+  }
+
   // 圆拟合（Kasa）：x,z 平面
   bool fitCircle(const std::deque<std::pair<double, cv::Point2d>>& h,
                  cv::Point2d& c, double& R) {
@@ -97,6 +103,15 @@ class RotTracker {
     }
     auto& det = msg->detections[pick];
 
+    // 用检测朝向估计角速度（比相位差分更直接）
+    double yaw_now = quatYaw(det.pose.orientation);
+    if (!has_yaw_) { yaw_ = yaw_now; has_yaw_ = true; }
+    else {
+      double dy = std::atan2(std::sin(yaw_now - yaw_), std::cos(yaw_now - yaw_));
+      double dty = (stamp - yaw_t_).toSec();
+      if (dty > 0.02) { yaw_rate_ = 0.8 * yaw_rate_ + 0.2 * (dy / dty); yaw_ = yaw_now; yaw_t_ = stamp; }
+    }
+
     if (!tracking_) {
       kf_.statePost = (cv::Mat_<float>(6,1) << det.pose.position.x, det.pose.position.y,
                        det.pose.position.z, 0,0,0);
@@ -136,13 +151,15 @@ class RotTracker {
 
     // 预测：转速足够才用圆周，否则退回匀速（避免直线段引入噪声）
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
-    bool rotating = has_center_ && std::fabs(omega_) >= omega_min_;
+    double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
+    bool rotating = has_center_ && std::fabs(w) >= omega_min_;
     if (rotating) {
         double cx = center_.x + vx * T_;
         double cz = center_.y + vz * T_;
-        double th = phase + omega_ * T_;
-        pred_.x = cx + R_ * std::cos(th);
-        pred_.z = cz + R_ * std::sin(th);
+        double dx = x - center_.x, dz = z - center_.y;
+        double ca = std::cos(w * T_), sa = std::sin(w * T_);
+        pred_.x = cx + dx * ca - dz * sa;
+        pred_.z = cz + dx * sa + dz * ca;
     } else {
         pred_.x = x + vx * T_;
         pred_.z = z + vz * T_;
@@ -168,9 +185,10 @@ class RotTracker {
     if (has_center_ && std::fabs(omega_) >= omega_min_) {
         double cx = center_.x + vx * gap;
         double cz = center_.y + vz * gap;
-        double th = phase_ + omega_ * gap;
-        pred_.x = cx + R_ * std::cos(th);
-        pred_.z = cz + R_ * std::sin(th);
+        double dx = cur_.x - center_.x, dz = cur_.z - center_.y;
+        double ca = std::cos(omega_ * gap), sa = std::sin(omega_ * gap);
+        pred_.x = cx + dx * ca - dz * sa;
+        pred_.z = cz + dx * sa + dz * ca;
     } else {
         pred_.x = cur_.x + vx * gap;
         pred_.z = cur_.z + vz * gap;
@@ -236,6 +254,9 @@ class RotTracker {
   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
   double phase_ = 0, omega_ = 0;
+  double yaw_ = 0, yaw_rate_ = 0;
+  bool has_yaw_ = false;
+  ros::Time yaw_t_;
   ros::Time last_t_, phase_t_;
   int body_id_ = 0;
   cv::Point3d cur_{0,0,0}, pred_{0,0,0};

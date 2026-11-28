@@ -6,11 +6,11 @@ from ft_msgs.msg import Detections, Track
 def pos(p): return (p.x, p.y, p.z)
 def dist(a,b): return math.sqrt(sum((a[i]-b[i])**2 for i in range(3)))
 
-def main(bag_path, track_topic):
+def main(bag_path, track_topic, det_topic='/ft/detection'):
     bag = rosbag.Bag(bag_path)
     dets=[]; tracks=[]
-    for topic,msg,_ in bag.read_messages(topics=['/ft/detection', track_topic]):
-        if topic=='/ft/detection':
+    for topic,msg,_ in bag.read_messages(topics=[det_topic, track_topic]):
+        if topic==det_topic:
             dets.append((msg.header.stamp.to_sec(), [pos(d.pose.position) for d in msg.detections]))
         else:
             tracks.append((msg.header.stamp.to_sec(), msg.tracking,
@@ -35,4 +35,4 @@ def main(bag_path, track_topic):
         print(track_topic,"no samples")
 
 if __name__=='__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv)>3 else '/ft/detection')

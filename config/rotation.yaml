@@ -2,7 +2,7 @@
 T: 0.1
 fit_window: 2.0          # 圆拟合历史窗口(s)
 phase_window: 0.5        # 角速度估计窗口(s)
-assoc_gate: 0.5          # 观测关联门限(m)
+assoc_gate: 0.8          # 观测关联门限(m)
 omega_min: 0.2           # 低于此角速度退回直线预测
 lost_time_thresh: 0.5    # 超过即断开 ID
 default_radius: 0.35     # 圆拟合失败时的默认半径(m)
