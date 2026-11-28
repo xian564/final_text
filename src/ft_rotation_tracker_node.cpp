@@ -126,6 +126,12 @@ class RotTracker {
       cv::Mat meas = (cv::Mat_<float>(3,1) << det.pose.position.x,
                       det.pose.position.y, det.pose.position.z);
       kf_.correct(meas);
+      {   // 速度限幅，避免异常观测把预测拉飞
+        float vx=kf_.statePost.at<float>(3), vy=kf_.statePost.at<float>(4), vz=kf_.statePost.at<float>(5);
+        float n=std::sqrt(vx*vx+vy*vy+vz*vz);
+        if (n > 6.0f) { float k=6.0f/n;
+          kf_.statePost.at<float>(3)=vx*k; kf_.statePost.at<float>(4)=vy*k; kf_.statePost.at<float>(5)=vz*k; }
+      }
       last_t_ = stamp;
     }
     float x=kf_.statePost.at<float>(0), y=kf_.statePost.at<float>(1), z=kf_.statePost.at<float>(2);

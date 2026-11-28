@@ -330,12 +330,6 @@ private:
         pnh_.setParam("dyn_v_min", cfg.dyn_v_min);
         pnh_.setParam("z_min", cfg.z_min);
         pnh_.setParam("z_max", cfg.z_max);
-        pnh_.setParam("fcs_gate_px", cfg.fcs_gate_px);
-        pnh_.setParam("fcs_grad_tol", cfg.fcs_grad_tol);
-        pnh_.setParam("bar_h_ratio_min", cfg.bar_h_ratio_min);
-        pnh_.setParam("pair_dy_ratio", cfg.pair_dy_ratio);
-        pnh_.setParam("quad_align_min", cfg.quad_align_min);
-        pnh_.setParam("quad_diag_tol", cfg.quad_diag_tol);
         pnh_.setParam("pair_y_ratio", cfg.pair_y_ratio);
         pnh_.setParam("white_enable", cfg.white_enable);
 
@@ -350,11 +344,6 @@ private:
         ratio_s_max_ = cfg.ratio_s_max;
         dyn_v_min_ = cfg.dyn_v_min;
         z_min_ = cfg.z_min; z_max_ = cfg.z_max;
-        fcs_gate_px_ = cfg.fcs_gate_px; fcs_grad_tol_ = cfg.fcs_grad_tol;
-        bar_h_ratio_min_ = cfg.bar_h_ratio_min;
-        pair_dy_ratio_ = cfg.pair_dy_ratio;
-        quad_align_min_ = cfg.quad_align_min;
-        quad_diag_tol_ = cfg.quad_diag_tol;
         pair_y_ratio_ = cfg.pair_y_ratio; white_enable_ = cfg.white_enable;
     }
 
