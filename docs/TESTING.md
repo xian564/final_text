@@ -150,9 +150,9 @@ import -window 0xc0000c /tmp/rviz_pose.png
 `docs/demo.mp4`（约 2 分钟）：
 - 静止/远距：`red_4.bag`
 - 匀速：`red_1&3(1).bag`
-- 近距/遮挡：`blue_guard.bag`
+- 近距：`red_4.bag`（`-s 15` 起）
 
 录法：`scripts/record_debug_video.py` 存 `/ft/debug/image` 帧，ffmpeg 拼标题卡。
 
-> 注：`blue_guard.bag` 原始画面平均亮度约 1.69/255，几乎全黑，只有蓝色灯条可见；
-> 检测仍能出框，故视频保留该段作为“极限低照度”演示。
+> 注：`blue_guard.bag` 平均亮度约 1.69/255，几乎全黑；检测仍能出框，
+> 作为“极限低照度”单独测试，不放入演示视频。

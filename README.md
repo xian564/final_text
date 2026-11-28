@@ -105,7 +105,7 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 ## 9. 测试与演示
 
 - 完整流程：[`docs/TESTING.md`](docs/TESTING.md)
-- 演示视频：[`docs/demo.mp4`](docs/demo.mp4)（约 2 分钟，静止/匀速/近距）
+- 演示视频：[`docs/demo.mp4`](docs/demo.mp4)（约 2 分钟，静止/匀速/近距；低照度另测）
 - 旋转对比：[`docs/ROTATION_COMPARE.md`](docs/ROTATION_COMPARE.md)
 
 ## 10. 已知限制
