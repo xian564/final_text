@@ -412,6 +412,37 @@ NN armors=1 infer_avg=55.2 ms   （≈18 FPS）
 
 ---
 
+### 7.5 识别错误怎么改（NN/传统通用）
+
+| 现象 | 先查 | 改法 |
+|---|---|---|
+| 编号整体偏 1（4→5） | 解码是否 `argmax+1` | 类别索引即编号：`number = idx` |
+| 编号 5/9 乱出 | 类别表（0 哨兵、1–4、6–8） | 5 置 0，或按训练 names 映射 |
+| 颜色红蓝反 | BGR/RGB 顺序、颜色行 0–3 | 统一 RGB；`argmax(0..3)` |
+| 框整体偏移 | letterbox 的 `pad_x/pad_y/scale` | 还原 `(x-pad)/scale` |
+| 角点交叉 | 四点顺序 | `orderCorners()` 重排 TL/TR/BR/BL |
+| 同一目标多个框 | NMS 阈值 | 降 `nms_thres`（0.45→0.3） |
+| 漏检 | 阈值/曝光/输入尺寸 | 降 `color_thres`，检查 resize |
+| 距离 z 偏大/偏小 | 物体尺寸/单位/K | 米制、Wb×bH、camera_info |
+| 框位置对但 z 跳 | 四点顺序/平面正对 | 重投影误差过滤、锁定 |
+| 训练后更差 | 伪标签/数据量 | 人工抽查 labels、加数据 |
+
+#### 排查顺序
+1. 打印原始输出形状与分数范围；
+2. 看编号行 4–12、颜色行 0–3 是否只有一个峰；
+3. 同一帧对比 Python 参考节点与 C++ 输出；
+4. 只改一处，跑同一段 bag，确认编号/框一致。
+
+#### 训练一个练习模型
+```bash
+# 数据集：practice/（20 帧，伪标签）
+pip install ultralytics
+python3 scripts/train_practice.py
+# 产物 runs/practice/weights/best.pt
+yolo export model=runs/practice/weights/best.pt format=onnx imgsz=[480,640] opset=12 simplify=True
+rosrun final_text detect_node_nn _model_path:=/path/new.onnx
+```
+
 ## 8. 常用命令
 
 ```bash

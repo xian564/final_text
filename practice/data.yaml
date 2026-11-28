@@ -1,0 +1,7 @@
+path: /root/catkin_ws/src/final_text/practice
+train: images/train
+val: images/val
+kpt_shape: [4, 2]
+flip_idx: [1, 0, 3, 2]
+names:
+  0: armor
