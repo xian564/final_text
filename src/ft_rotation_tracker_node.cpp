@@ -24,6 +24,7 @@ class RotTracker {
     nh_.param<double>("lost_time_thresh", lost_thresh_, 0.5);
     nh_.param<double>("default_radius", R_, 0.35);
     nh_.param<double>("omega_min", omega_min_, 0.2);
+    nh_.param<double>("fit_res_max", fit_res_max_, 0.05);
     nh_.param<double>("q_pos", q_pos_, 0.1);
     nh_.param<double>("q_vel", q_vel_, 0.5);
     nh_.param<double>("r_pos", r_pos_, 0.05);
@@ -56,7 +57,7 @@ class RotTracker {
 
   // 圆拟合（Kasa）：x,z 平面
   bool fitCircle(const std::deque<std::pair<double, cv::Point2d>>& h,
-                 cv::Point2d& c, double& R) {
+                 cv::Point2d& c, double& R, double& rms) {
     if (h.size() < 8) return false;
     double Sx=0,Sz=0,Sxx=0,Szz=0,Sxz=0,Sx3=0,Sz3=0,Sxzz=0,Sxxz=0;
     for (auto& p : h) {
@@ -75,6 +76,9 @@ class RotTracker {
     double r2 = cc + a*a + bb*bb;
     if (r2 <= 0) return false;
     c = cv::Point2d(a, bb); R = std::sqrt(r2);
+    double e = 0;
+    for (auto& p : h) e += std::pow(cv::norm(p.second - c) - R, 2);
+    rms = std::sqrt(e / (double)h.size());
     return R > 0.1 && R < 2.0;
   }
 
@@ -140,7 +144,7 @@ class RotTracker {
     hist_.push_back({stamp.toSec(), cv::Point2d(x, z)});
     while (!hist_.empty() && stamp.toSec() - hist_.front().first > fit_window_) hist_.pop_front();
     cv::Point2d c; double R;
-    if (fitCircle(hist_, c, R)) { center_ = c; R_ = R; has_center_ = true; }
+    if (fitCircle(hist_, c, R, fit_res_)) { center_ = c; R_ = R; has_center_ = true; }
 
     // 相位/角速度
     double phase = has_center_ ? std::atan2(z - center_.y, x - center_.x)
@@ -159,9 +163,10 @@ class RotTracker {
     // 预测：转速足够才用圆周，否则退回匀速（避免直线段引入噪声）
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
     double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
-    if (!rot_mode_ && std::fabs(w) >= omega_min_) rot_mode_ = true;
-    else if (rot_mode_ && std::fabs(w) < omega_min_ * 0.75) rot_mode_ = false;
-    bool rotating = has_center_ && rot_mode_;
+    bool fast = (std::fabs(w) >= omega_min_) && (fit_res_ < fit_res_max_) && has_center_;
+    rot_cnt_ = std::max(0, std::min(10, rot_cnt_ + (fast ? 1 : -1)));
+    rot_mode_ = (rot_cnt_ >= 3);          // 连续 3 帧可信才进旋转
+    bool rotating = rot_mode_;
     if (rotating) {
         double cx = center_.x + vx * T_;
         double cz = center_.y + vz * T_;
@@ -192,7 +197,7 @@ class RotTracker {
     // 极限推算：转速足够用圆周，否则直线
     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
     double w = (std::fabs(yaw_rate_) > omega_min_) ? yaw_rate_ : omega_;
-    if (has_center_ && rot_mode_) {
+    if (has_center_ && rot_mode_ && fit_res_ < fit_res_max_) {
         double cx = center_.x + vx * gap;
         double cz = center_.y + vz * gap;
         double dx = cur_.x - center_.x, dz = cur_.z - center_.y;
@@ -261,6 +266,8 @@ class RotTracker {
   double R_ = 0.35, T_ = 0.1, fit_window_ = 2.0, phase_window_ = 0.5;
   double gate_ = 1.0, lost_thresh_ = 0.5, q_pos_=0.1, q_vel_=0.5, r_pos_=0.05;
   double omega_min_ = 0.2;
+  int rot_cnt_ = 0;
+  double fit_res_ = 1e9, fit_res_max_ = 0.05;
   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
   bool rot_mode_ = false;

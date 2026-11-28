@@ -220,3 +220,38 @@ Detected jump back in time of 24.061s. Clearing TF buffer.
 - OGRE/llvmpipe：容器无 GPU，走软件渲染，正常；
 - `jump back in time`：bag 循环/回放时间倒退，RViz 清 TF 缓存；
   短暂丢 TF，不是代码错误。
+
+---
+
+# 圆拟合残差门限 + 连续帧确认（最终版）
+
+## 代码
+```cpp
+bool fast = (std::fabs(w) >= omega_min_) &&
+            (fit_res_ < fit_res_max_) && has_center_;
+rot_cnt_ = clamp(rot_cnt_ + (fast ? 1 : -1), 0, 10);
+rot_mode_ = (rot_cnt_ >= 3);      // 连续 3 帧可信才进旋转
+```
+- `fit_res_`：圆拟合 RMS 残差；
+- `fit_res_max=0.05m`：残差太大说明圆心不可信，退回直线；
+- `rot_cnt_>=3`：避免单帧跳变误触发。
+
+## 结果（NN 检测，red_4）
+| 指标 | 匀速 | 旋转 |
+|---|---|---|
+| 全段 mean/median | 0.070 / 0.048 | 0.093 / 0.086 |
+| >30°/s mean/median | 0.212 / 0.097 | **0.136** / 0.109 |
+| ≤30°/s mean/median | 0.059 / 0.040 | 0.090 / 0.082 |
+
+## 结论
+- 高转速段旋转**平均误差更低**（0.136 vs 0.212），但中位略差；
+- 低转速段匀速明显更好；
+- 全段仍匀速占优：旋转在慢速段没有收益；
+- 根因仍是检测换板/关联，不是圆周公式。
+
+## 参数
+```yaml
+omega_min: 0.5
+fit_res_max: 0.05
+assoc_gate: 0.5
+```
