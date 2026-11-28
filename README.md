@@ -121,7 +121,11 @@ rosrun dynamic_reconfigure dynparam set /vision_node_v3 blue_h_min 120
 
 见 [`bonus/README.md`](bonus/README.md)：v3 完整功能、v3_2 车体几何、v3_split 分块、v4 早期骨架。
 
-## 12. AI 使用
+## 12. 提交清单
+
+见 [`docs/SUBMISSION_CHECKLIST.md`](docs/SUBMISSION_CHECKLIST.md)。
+
+## 13. AI 使用
 
 见 [`ai_usage.md`](ai_usage.md)。
 
