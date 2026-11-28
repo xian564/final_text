@@ -1,0 +1,206 @@
+diff --git a/config/rotation.yaml b/config/rotation.yaml
+index c771819..315fd2e 100644
+--- a/config/rotation.yaml
++++ b/config/rotation.yaml
+@@ -2,7 +2,8 @@
+ T: 0.1
+ fit_window: 2.0          # 圆拟合历史窗口(s)
+ phase_window: 0.5        # 角速度估计窗口(s)
+-assoc_gate: 1.0          # 观测关联门限(m)
++assoc_gate: 0.5
++omega_min: 0.2          # 观测关联门限(m)
+ lost_time_thresh: 0.5    # 超过即断开 ID
+ default_radius: 0.35     # 圆拟合失败时的默认半径(m)
+ 
+diff --git a/scripts/eval_prediction.py b/scripts/eval_prediction.py
+new file mode 100644
+index 0000000..b5347f9
+--- /dev/null
++++ b/scripts/eval_prediction.py
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++# 评估 position_predict 与“下一帧实际检测”的误差（不用真值）
++import sys, math, rosbag
++from ft_msgs.msg import Detections, Track
++
++def pos(p): return (p.x, p.y, p.z)
++def dist(a,b): return math.sqrt(sum((a[i]-b[i])**2 for i in range(3)))
++
++def main(bag_path, track_topic):
++    bag = rosbag.Bag(bag_path)
++    dets=[]; tracks=[]
++    for topic,msg,_ in bag.read_messages(topics=['/ft/detection', track_topic]):
++        if topic=='/ft/detection':
++            dets.append((msg.header.stamp.to_sec(), [pos(d.pose.position) for d in msg.detections]))
++        else:
++            tracks.append((msg.header.stamp.to_sec(), msg.tracking,
++                           pos(msg.position), pos(msg.position_predict)))
++    bag.close()
++    errs=[]
++    for t,trk,cur,pred in tracks:
++        if not trk: continue
++        nxt=[d for d in dets if t < d[0] <= t+0.25]
++        if not nxt: continue
++        cand=[p for p in nxt[0][1]]
++        if not cand: continue
++        # 用当前位置匹配下一帧的同一块板
++        actual=min(cand, key=lambda p: dist(p,cur))
++        errs.append(dist(pred,actual))
++    if errs:
++        errs.sort()
++        print(track_topic, "n=",len(errs),
++              "mean=%.3f m"% (sum(errs)/len(errs)),
++              "median=%.3f m"% errs[len(errs)//2])
++    else:
++        print(track_topic,"no samples")
++
++if __name__=='__main__':
++    main(sys.argv[1], sys.argv[2])
+diff --git a/scripts/record_debug_video.py b/scripts/record_debug_video.py
+new file mode 100644
+index 0000000..6e48b93
+--- /dev/null
++++ b/scripts/record_debug_video.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++# 录 /ft/debug/image 为帧序列（10Hz），用于拼演示视频
++# 用法: python3 record_debug_video.py /tmp/vid/s1 40
++import os, sys, time, rospy, cv_bridge, cv2
++from sensor_msgs.msg import Image
++
++out = sys.argv[1]
++secs = float(sys.argv[2]) if len(sys.argv) > 2 else 30.0
++os.makedirs(out, exist_ok=True)
++bridge = cv_bridge.CvBridge()
++last = [0.0]; idx = [0]
++
++def cb(msg):
++    t = time.time()
++    if t - last[0] < 0.1:   # 10 Hz
++        return
++    last[0] = t
++    try:
++        img = bridge.imgmsg_to_cv2(msg, 'bgr8')
++    except Exception:
++        return
++    cv2.imwrite(os.path.join(out, 'f_%05d.jpg' % idx[0]), img)
++    idx[0] += 1
++
++rospy.init_node('rec_video')
++rospy.Subscriber('/ft/debug/image', Image, cb)
++end = time.time() + secs
++while time.time() < end and not rospy.is_shutdown():
++    time.sleep(0.05)
++print('frames', idx[0])
+diff --git a/src/ft_rotation_tracker_node.cpp b/src/ft_rotation_tracker_node.cpp
+index b71e17b..0f2eb4e 100644
+--- a/src/ft_rotation_tracker_node.cpp
++++ b/src/ft_rotation_tracker_node.cpp
+@@ -23,6 +23,7 @@ class RotTracker {
+     nh_.param<double>("assoc_gate", gate_, 1.0);
+     nh_.param<double>("lost_time_thresh", lost_thresh_, 0.5);
+     nh_.param<double>("default_radius", R_, 0.35);
++    nh_.param<double>("omega_min", omega_min_, 0.2);
+     nh_.param<double>("q_pos", q_pos_, 0.1);
+     nh_.param<double>("q_vel", q_vel_, 0.5);
+     nh_.param<double>("r_pos", r_pos_, 0.05);
+@@ -133,15 +134,20 @@ class RotTracker {
+       }
+     }
+ 
+-    // 预测：车体直线 + 旋转相位
++    // 预测：转速足够才用圆周，否则退回匀速（避免直线段引入噪声）
+     double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
+-    // 车体中心先做直线外推，再叠加旋转相位
+-    double cx = (has_center_ ? center_.x : x) + vx * T_;
+-    double cz = (has_center_ ? center_.y : z) + vz * T_;
+-    double th = phase + omega_ * T_;
+-    pred_.x = cx + R_ * std::cos(th);
++    bool rotating = has_center_ && std::fabs(omega_) >= omega_min_;
++    if (rotating) {
++        double cx = center_.x + vx * T_;
++        double cz = center_.y + vz * T_;
++        double th = phase + omega_ * T_;
++        pred_.x = cx + R_ * std::cos(th);
++        pred_.z = cz + R_ * std::sin(th);
++    } else {
++        pred_.x = x + vx * T_;
++        pred_.z = z + vz * T_;
++    }
+     pred_.y = y + vy * T_;
+-    pred_.z = cz + R_ * std::sin(th);
+     has_pred_ = true;
+     cur_.x = x; cur_.y = y; cur_.z = z;
+ 
+@@ -157,13 +163,19 @@ class RotTracker {
+       publish(stamp, false);
+       return;
+     }
+-    // 极限推算：车体直线 + 相位继续转
+-    double cx = (has_center_ ? center_.x : cur_.x) + kf_.statePost.at<float>(3) * gap;
+-    double cz = (has_center_ ? center_.y : cur_.z) + kf_.statePost.at<float>(5) * gap;
+-    double th = phase_ + omega_ * gap;
+-    pred_.x = cx + R_ * std::cos(th);
+-    pred_.y = cur_.y + kf_.statePost.at<float>(4) * gap;
+-    pred_.z = cz + R_ * std::sin(th);
++    // 极限推算：转速足够用圆周，否则直线
++    double vx = kf_.statePost.at<float>(3), vy = kf_.statePost.at<float>(4), vz = kf_.statePost.at<float>(5);
++    if (has_center_ && std::fabs(omega_) >= omega_min_) {
++        double cx = center_.x + vx * gap;
++        double cz = center_.y + vz * gap;
++        double th = phase_ + omega_ * gap;
++        pred_.x = cx + R_ * std::cos(th);
++        pred_.z = cz + R_ * std::sin(th);
++    } else {
++        pred_.x = cur_.x + vx * gap;
++        pred_.z = cur_.z + vz * gap;
++    }
++    pred_.y = cur_.y + vy * gap;
+     publish(stamp, false);
+     publishMarkers(stamp);
+   }
+@@ -220,6 +232,7 @@ class RotTracker {
+   cv::Point2d center_{0,0};
+   double R_ = 0.35, T_ = 0.1, fit_window_ = 2.0, phase_window_ = 0.5;
+   double gate_ = 1.0, lost_thresh_ = 0.5, q_pos_=0.1, q_vel_=0.5, r_pos_=0.05;
++  double omega_min_ = 0.2;
+   std::string det_topic_, track_topic_, marker_topic_, body_id_topic_;
+   bool tracking_ = false, has_center_ = false, has_phase_ = false, has_pred_ = false;
+   double phase_ = 0, omega_ = 0;
+diff --git a/src/ft_tracker_node.cpp b/src/ft_tracker_node.cpp
+index ca781d9..e292f87 100644
+--- a/src/ft_tracker_node.cpp
++++ b/src/ft_tracker_node.cpp
+@@ -68,7 +68,7 @@ public:
+         ros::Time now = ros::Time::now();
+         if (!is_tracking_) return;
+ 
+-        double gap = (now - last_det_time_).toSec();
++        double gap = (ros::Time::now() - last_det_wall_).toSec();
+         if (gap < 0.0) {                  // 仿真时间回跳
+             is_tracking_ = false;
+             return;
+@@ -125,6 +125,7 @@ private:
+             last_step_time_ = stamp;
+             last_pred_time_ = stamp;
+             is_tracking_ = true;
++            last_det_wall_ = ros::Time::now();
+             return;
+         }
+ 
+@@ -142,6 +143,7 @@ private:
+ 
+         frame_id_ = msg->header.frame_id;
+         last_det_time_ = stamp;
++        last_det_wall_ = ros::Time::now();
+         last_step_time_ = stamp;
+         last_pred_time_ = stamp;
+         publishTrack(stamp, true);
+@@ -254,6 +256,7 @@ private:
+     std::string frame_id_ = "hk_camera_ca";
+     ros::Time last_det_time_, last_step_time_, last_pred_time_;
+     ros::Time last_image_stamp_;
++    ros::Time last_det_wall_;
+ 
+     double predict_T_;
+     double vmax_mps_ = 6.0;
