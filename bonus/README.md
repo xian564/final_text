@@ -49,8 +49,7 @@ rosrun final_text detect_node_v3_split
 
 ## 5. 对话与启发链接
 
-- 对话《如何判断是否整包生成的代码》：
-  https://chat.deepseek.com/share/snkxru5zfhah5c7pce
+- 对话《如何判断是否整包生成的代码》（本地会话记录，`~/.dsh/...`）：
   讨论“整包生成 vs 逐步修改”的判定标准，本目录的版本划分受其启发。
 - 对话导出：
   - [`docs/ai_chats/01_OpenCV轮廓与RoboMaster自瞄.md`](../docs/ai_chats/01_OpenCV轮廓与RoboMaster自瞄.md)
