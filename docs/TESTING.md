@@ -81,3 +81,56 @@ rosrun final_text detect_node_v3_split   # 分块版
 | /ft/debug/image | 27.8 Hz |
 | /ft/debug/marker | 68.0 Hz |
 | 动态调参 | blue_h_min 85 → 120 → 85，生效 |
+
+## 8. 截图与对比流程（传统 vs NN）
+
+### 8.1 同帧对比（推荐）
+```bash
+# 终端 1：数据
+rosbag play bag/red_4.bag --clock -l
+
+# 终端 2：传统链路（/ft/debug/image）
+rosrun final_text detect_node_v3_1
+
+# 终端 3：NN 链路（/ft/debug/image_nn）
+rosrun final_text detect_node_nn _model_path:=/root/catkin_ws/bag/armor_allfp32.onnx
+
+# 终端 4：抓 3 对同帧图
+rosrun final_text capture_compare.py _out:=/tmp/compare _n:=3
+```
+输出：`/tmp/compare/compare_000.png ...`，左=传统、右=NN。
+
+示例已保存：`docs/compare_demo.png`（左传统 ID:1/5 + 三轴，右 NN 框）。
+
+### 8.2 单模式截图
+```bash
+roslaunch final_text test_vision.launch mode:=nn
+rosrun final_text capture_debug.py _topic:=/ft/debug/image _out:=/tmp/nn _n:=5
+```
+
+### 8.3 RViz 位姿截图
+1. 启动 `test_vision.launch`（默认带 RViz）；
+2. RViz 里确认 `armor_v3` TF、三轴、预测 marker；
+3. 用桌面截图（PrtSc）保存 `rviz_pose.png`。
+
+### 8.4 漏检说明模板
+
+| 项 | 内容 |
+|---|---|
+| 帧号/时间 | `rosbag info` 或画面时间 |
+| 现象 | 无框 / 框错 / 编号错 |
+| 原因分类 | 过曝、遮挡、远距（z>8m）、大角度、颜色偏 |
+| 证据 | 该帧 z、框面积、亮度、NN score |
+| 处理 | 调哪个参数 / 已知限制 |
+
+## 9. 一条 launch 切换 tradition / nn
+
+```bash
+roslaunch final_text test_vision.launch mode:=tradition
+roslaunch final_text test_vision.launch mode:=nn model_path:=/root/catkin_ws/bag/armor_allfp32.onnx
+```
+实测：
+```
+tradition: /ft/detection 30.5 Hz, number=0（无模板）
+nn:        /ft/detection 15.2 Hz, number=5（NN 输出）
+```
